@@ -12,8 +12,8 @@ Telegram bot that monitors EV industry news from RSS feeds (InsideEVs, Electrek,
 - **Translation fallback chain** — Google Translate → MyMemory → original English title. A translator outage never drops a post.
 - **Rich post cards** — cover image (RSS media tags with `og:image` fallback), translated summary, source attribution and hashtags; degrades gracefully to a text post if no image is available.
 - **Smart keyword filter** — case-insensitive word-boundary regex, so `ev` matches "EV sales" but not "every" or "level". Keywords are stored in the database and editable from Telegram at runtime — no restart needed.
-- **Deduplication** — SQLite (async via `aiosqlite`) keyed by article URL. Restarts and overlapping feeds never cause reposts.
-- **Rate-limited posting queue** — strict 60s interval between posts, safe against Telegram flood limits.
+- **Deduplication** — SQLite (async via `aiosqlite`) keyed by normalized article URL (tracking parameters like `utm_*` are stripped first). Restarts and overlapping feeds never cause reposts.
+- **Rate-limited posting queue** — strict 60s interval between posts; if Telegram ever responds with a flood limit, the bot waits exactly as long as Telegram asks and retries.
 - **Lead generation** — configurable inline button under every post (link to a manager / order page).
 - **Admin tools** — a control panel right in Telegram: `/stats` (posts, queue, filter status), `/keywords`, `/add_kw`, `/del_kw` (manage the filter live), `/pause` / `/resume` (hold publishing without stopping the bot), `/delete_last` (remove the latest post from the channel and the database).
 

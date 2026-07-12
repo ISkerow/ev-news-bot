@@ -6,7 +6,7 @@ import logging
 import functools
 import aiohttp
 import feedparser
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator, MyMemoryTranslator
 import config
@@ -17,6 +17,9 @@ logger = logging.getLogger("NewsBot")
 REQUEST_TIMEOUT = 30   # секунд на один запрос
 MAX_ATTEMPTS = 3       # попыток на каждый URL
 RETRY_BASE_DELAY = 2   # задержка растёт экспоненциально: 2, 4, 8 сек
+
+# Трекинговые параметры, не влияющие на содержимое страницы
+TRACKING_PARAMS = {"fbclid", "gclid", "yclid", "igshid", "mc_cid", "mc_eid", "ref"}
 
 
 class NewsParser:
@@ -71,6 +74,17 @@ class NewsParser:
             return False
         # Границы слов: "ev" совпадёт в "EV sales", но не в "every" или "level"
         return bool(NewsParser._build_pattern(tuple(keywords)).search(title))
+
+    @staticmethod
+    def _clean_url(url: str) -> str:
+        """Убирает трекинговые метки (utm_* и пр.) и якорь — иначе одна и та же
+        статья с разными метками выглядит для дедупликации как разные."""
+        parts = urlparse(url)
+        query = [
+            (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if not k.lower().startswith("utm_") and k.lower() not in TRACKING_PARAMS
+        ]
+        return urlunparse(parts._replace(query=urlencode(query), fragment=""))
 
     @staticmethod
     def _clean_summary(html: str, limit: int = 200) -> str:
@@ -189,7 +203,7 @@ class NewsParser:
                     if NewsParser.is_relevant(entry.title, keywords):
                         source_items.append({
                             "title_en": entry.title,
-                            "url": entry.link,
+                            "url": NewsParser._clean_url(entry.link),
                             "summary_en": NewsParser._clean_summary(entry.get("summary", "")),
                             "image": NewsParser._extract_image(entry),
                             "source": source,
