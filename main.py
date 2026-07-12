@@ -5,7 +5,7 @@ import sys
 from aiogram import Bot, Dispatcher, types, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -26,10 +26,14 @@ class QueueManager:
         self.queue = asyncio.Queue()
         self.bot = bot
         self.db = db
+        self.paused = False
 
     async def worker(self):
         """Разгребает очередь по одной новости с жестким интервалом."""
         while True:
+            if self.paused:
+                await asyncio.sleep(5)
+                continue
             item = await self.queue.get()
             try:
                 if not await self.db.url_exists(item['url']):
@@ -97,6 +101,69 @@ queue_manager = QueueManager(bot, db)
 async def cmd_start(message: types.Message):
     await message.answer("🤖 Бот запущен. Система автоматизации активна.")
 
+@router.message(Command("stats"))
+async def cmd_stats(message: types.Message):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    stats = await db.get_stats()
+    keywords = await db.get_keywords()
+    status = "⏸ на паузе" if queue_manager.paused else "▶️ активна"
+    await message.answer(
+        f"📊 <b>Статистика</b>\n\n"
+        f"Всего опубликовано: {stats['total']}\n"
+        f"Сегодня: {stats['today']}\n"
+        f"В очереди: {queue_manager.queue.qsize()}\n"
+        f"Ключевых слов: {len(keywords)}\n"
+        f"Публикация: {status}"
+    )
+
+@router.message(Command("keywords"))
+async def cmd_keywords(message: types.Message):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    keywords = await db.get_keywords()
+    if not keywords:
+        return await message.answer("Список ключевых слов пуст.")
+    await message.answer("🔑 Ключевые слова:\n" + ", ".join(keywords))
+
+@router.message(Command("add_kw"))
+async def cmd_add_kw(message: types.Message, command: CommandObject):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    if not command.args:
+        return await message.answer("Использование: /add_kw слово или фраза")
+    word = command.args.lower().strip()
+    if await db.add_keyword(word):
+        await message.answer(f"✅ Добавлено: «{word}»")
+    else:
+        await message.answer(f"«{word}» уже в списке.")
+
+@router.message(Command("del_kw"))
+async def cmd_del_kw(message: types.Message, command: CommandObject):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    if not command.args:
+        return await message.answer("Использование: /del_kw слово")
+    word = command.args.lower().strip()
+    if await db.remove_keyword(word):
+        await message.answer(f"🗑 Удалено: «{word}»")
+    else:
+        await message.answer(f"«{word}» нет в списке.")
+
+@router.message(Command("pause"))
+async def cmd_pause(message: types.Message):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    queue_manager.paused = True
+    await message.answer("⏸ Публикация приостановлена. Новости копятся в очереди.")
+
+@router.message(Command("resume"))
+async def cmd_resume(message: types.Message):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    queue_manager.paused = False
+    await message.answer("▶️ Публикация возобновлена.")
+
 @router.message(Command("delete_last"))
 async def cmd_delete_last(message: types.Message):
     if message.from_user.id != config.ADMIN_ID:
@@ -116,7 +183,8 @@ async def cmd_delete_last(message: types.Message):
 async def scheduled_parser():
     while True:
         logger.info("🔍 Запуск парсинга RSS...")
-        news = await NewsParser.fetch_rss()
+        keywords = await db.get_keywords()
+        news = await NewsParser.fetch_rss(keywords)
         added = 0
         for item in news:
             if not await db.url_exists(item['url']):
@@ -127,6 +195,8 @@ async def scheduled_parser():
 
 async def main():
     await db.init_db()
+    # Первый запуск: переносим стартовые слова из keywords.json в базу
+    await db.seed_keywords(NewsParser.load_keywords())
     dp.include_router(router)
     
     asyncio.create_task(queue_manager.worker())

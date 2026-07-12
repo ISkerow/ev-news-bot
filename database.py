@@ -15,7 +15,44 @@ class Database:
                     posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            await db.execute("CREATE TABLE IF NOT EXISTS keywords (word TEXT PRIMARY KEY)")
             await db.commit()
+
+    # --- Ключевые слова (живут в базе, чтобы переживать редеплой) ---
+
+    async def seed_keywords(self, words: list):
+        """Одноразовое заполнение: если таблица пуста, кладём стартовый список."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM keywords")
+            if (await cursor.fetchone())[0] == 0 and words:
+                await db.executemany(
+                    "INSERT OR IGNORE INTO keywords (word) VALUES (?)",
+                    [(w.lower().strip(),) for w in words]
+                )
+                await db.commit()
+
+    async def get_keywords(self) -> list:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT word FROM keywords ORDER BY word")
+            return [row[0] for row in await cursor.fetchall()]
+
+    async def add_keyword(self, word: str) -> bool:
+        """Возвращает False, если слово уже было в списке."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "INSERT OR IGNORE INTO keywords (word) VALUES (?)", (word.lower().strip(),)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def remove_keyword(self, word: str) -> bool:
+        """Возвращает False, если такого слова не было."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM keywords WHERE word = ?", (word.lower().strip(),)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def url_exists(self, url: str) -> bool:
         async with aiosqlite.connect(self.db_path) as db:

@@ -11,11 +11,11 @@ Telegram bot that monitors EV industry news from RSS feeds (InsideEVs, Electrek,
 - **Resilient fetching** — 3 retries per feed with exponential backoff, 30s timeout, separate handling for timeouts, network errors, and malformed XML. One dead source never blocks the others.
 - **Translation fallback chain** — Google Translate → MyMemory → original English title. A translator outage never drops a post.
 - **Rich post cards** — cover image (RSS media tags with `og:image` fallback), translated summary, source attribution and hashtags; degrades gracefully to a text post if no image is available.
-- **Smart keyword filter** — case-insensitive word-boundary regex, so `ev` matches "EV sales" but not "every" or "level". Keywords live in `keywords.json` and are hot-reloaded each cycle — no restart needed.
+- **Smart keyword filter** — case-insensitive word-boundary regex, so `ev` matches "EV sales" but not "every" or "level". Keywords are stored in the database and editable from Telegram at runtime — no restart needed.
 - **Deduplication** — SQLite (async via `aiosqlite`) keyed by article URL. Restarts and overlapping feeds never cause reposts.
 - **Rate-limited posting queue** — strict 60s interval between posts, safe against Telegram flood limits.
 - **Lead generation** — configurable inline button under every post (link to a manager / order page).
-- **Admin tools** — `/delete_last` removes the latest post from both the channel and the database.
+- **Admin tools** — a control panel right in Telegram: `/stats` (posts, queue, filter status), `/keywords`, `/add_kw`, `/del_kw` (manage the filter live), `/pause` / `/resume` (hold publishing without stopping the bot), `/delete_last` (remove the latest post from the channel and the database).
 
 ## How it works
 
@@ -47,7 +47,7 @@ All secrets are set via environment variables (`.env` is supported):
 | `MANAGER_URL` | no       | Link for the inline button under posts; omit to post without a button |
 | `DB_PATH`     | no       | Database file location (default `news_production.db`); point it at a mounted volume in production |
 
-Tuning lives in [config.py](config.py): RSS source list, posting interval (`POST_DELAY`), database name. Keyword filter is edited in [keywords.json](keywords.json) at runtime.
+Tuning lives in [config.py](config.py): RSS source list, posting interval (`POST_DELAY`), database name. The keyword filter is managed from Telegram (`/keywords`, `/add_kw`, `/del_kw`); [keywords.json](keywords.json) only seeds the initial list on first run.
 
 ## Project structure
 
