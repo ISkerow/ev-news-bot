@@ -63,6 +63,24 @@ Tuning lives in [config.py](config.py): RSS source list, posting interval (`POST
 
 The bot uses long polling — no webhooks, ports, or reverse proxy needed. It runs anywhere Python runs: a VPS (`python main.py` under systemd), Railway (deploy as a worker with start command `python main.py`), or Docker.
 
+### Railway
+
+Deploy from this GitHub repo — the `Procfile` provides the start command. Set the environment variables from the table above, attach a volume mounted at `/data`, and set `DB_PATH=/data/news_production.db` so deduplication survives redeploys.
+
+### Docker
+
+```bash
+docker build -t ev-news-bot .
+docker run -d --name ev-news-bot \
+  --env-file .env \
+  -e DB_PATH=/data/news_production.db \
+  -v ev_news_data:/data \
+  --restart unless-stopped \
+  ev-news-bot
+```
+
+The named volume `ev_news_data` keeps the SQLite database across container restarts and rebuilds.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
