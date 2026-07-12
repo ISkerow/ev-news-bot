@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import sys
 from aiogram import Bot, Dispatcher, types, Router
@@ -32,8 +33,15 @@ class QueueManager:
             item = await self.queue.get()
             try:
                 if not await self.db.url_exists(item['url']):
+                    # Если в RSS не было картинки — пробуем взять og:image со страницы статьи
+                    if not item.get('image'):
+                        item['image'] = await NewsParser.fetch_og_image(item['url'])
+
                     title_ru = NewsParser.translate_title(item['title_en'])
-                    
+                    summary_ru = ""
+                    if item.get('summary_en'):
+                        summary_ru = NewsParser.translate_title(item['summary_en'])
+
                     # Кнопка лидогенерации; без MANAGER_URL пост уходит без кнопки
                     kb = None
                     if config.MANAGER_URL:
@@ -41,16 +49,39 @@ class QueueManager:
                             [InlineKeyboardButton(text="🚗 Консультация менеджера", url=config.MANAGER_URL)]
                         ])
 
-                    text = f"<b>{title_ru}</b>\n\n<a href='{item['url']}'>Читать оригинал</a>\n\n#EV #AutoNews"
-                    
-                    msg = await self.bot.send_message(
-                        chat_id=config.CHANNEL_ID,
-                        text=text,
-                        parse_mode=ParseMode.HTML,
-                        reply_markup=kb,
-                        disable_web_page_preview=False
-                    )
-                    
+                    # Экранируем < > & — иначе Telegram отклонит HTML-разметку
+                    source = item.get('source', '')
+                    parts = [f"<b>{html.escape(title_ru, quote=False)}</b>"]
+                    if summary_ru:
+                        parts.append(html.escape(summary_ru, quote=False))
+                    footer = f"<a href='{item['url']}'>Читать оригинал</a>"
+                    if source:
+                        footer = f"📰 {source} · {footer}"
+                    parts.append(footer)
+                    source_tag = ''.join(c for c in source if c.isalnum())
+                    parts.append("#EV #AutoNews" + (f" #{source_tag}" if source_tag else ""))
+                    text = "\n\n".join(parts)
+
+                    # С обложкой — фото-пост; если фото не прошло — обычный текстовый
+                    msg = None
+                    if item.get('image'):
+                        try:
+                            msg = await self.bot.send_photo(
+                                chat_id=config.CHANNEL_ID,
+                                photo=item['image'],
+                                caption=text,
+                                reply_markup=kb
+                            )
+                        except Exception as e:
+                            logger.warning(f"Фото не отправилось ({e}), публикуем текстом")
+                    if msg is None:
+                        msg = await self.bot.send_message(
+                            chat_id=config.CHANNEL_ID,
+                            text=text,
+                            reply_markup=kb,
+                            disable_web_page_preview=False
+                        )
+
                     await self.db.add_news(item['url'], title_ru, msg.message_id)
                     logger.info(f"✅ Опубликовано: {title_ru}")
             except Exception as e:

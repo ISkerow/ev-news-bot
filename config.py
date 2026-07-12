@@ -15,6 +15,13 @@ RSS_URLS = [
     "https://carnewschina.com/feed/"
 ]
 
+# Красивые имена источников для подписи в посте (домен -> имя)
+SOURCE_NAMES = {
+    "insideevs.com": "InsideEVs",
+    "electrek.co": "Electrek",
+    "carnewschina.com": "CarNewsChina",
+}
+
 # Путь к базе; на хостинге с volume задаётся через env (например /data/news_production.db)
 DB_NAME = os.getenv("DB_PATH", "news_production.db")
 POST_DELAY = 60
