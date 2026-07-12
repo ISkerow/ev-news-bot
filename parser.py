@@ -6,6 +6,8 @@ import logging
 import functools
 import aiohttp
 import feedparser
+from urllib.parse import urlparse
+from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator, MyMemoryTranslator
 import config
 
@@ -71,6 +73,60 @@ class NewsParser:
         return bool(NewsParser._build_pattern(tuple(keywords)).search(title))
 
     @staticmethod
+    def _clean_summary(html: str, limit: int = 200) -> str:
+        """Убирает HTML-теги из описания и обрезает до limit символов по слову."""
+        text = BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True)
+        if len(text) <= limit:
+            return text
+        return text[:limit].rsplit(" ", 1)[0] + "…"
+
+    @staticmethod
+    def _extract_image(entry) -> str | None:
+        """Ищет обложку статьи: media-теги RSS, вложения, затем <img> в тексте."""
+        for media in entry.get("media_content", []):
+            if media.get("url") and media.get("medium", "image") == "image":
+                return media["url"]
+        for thumb in entry.get("media_thumbnail", []):
+            if thumb.get("url"):
+                return thumb["url"]
+        for enc in entry.get("enclosures", []):
+            if enc.get("href") and enc.get("type", "").startswith("image/"):
+                return enc["href"]
+        html = ""
+        if entry.get("content"):
+            html = entry.content[0].get("value", "")
+        html = html or entry.get("summary", "")
+        img = BeautifulSoup(html, "html.parser").find("img")
+        if img and img.get("src"):
+            return img["src"]
+        return None
+
+    @staticmethod
+    async def fetch_og_image(article_url: str) -> str | None:
+        """Достаёт обложку (og:image) со страницы статьи — для лент без картинок в RSS."""
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        try:
+            async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
+                async with session.get(article_url, ssl=ssl_ctx, timeout=15) as resp:
+                    if resp.status != 200:
+                        return None
+                    page = await resp.text()
+            tag = BeautifulSoup(page, "html.parser").find("meta", property="og:image")
+            if tag and tag.get("content"):
+                return tag["content"]
+        except Exception as e:
+            logger.warning(f"og:image не получен для {article_url}: {e}")
+        return None
+
+    @staticmethod
+    def _source_name(feed_url: str) -> str:
+        """Имя источника по домену; для неизвестных доменов — сам домен."""
+        domain = urlparse(feed_url).netloc.removeprefix("www.")
+        return config.SOURCE_NAMES.get(domain, domain)
+
+    @staticmethod
     async def _fetch_feed(session: aiohttp.ClientSession, url: str, ssl_ctx: ssl.SSLContext):
         """Скачивает и парсит RSS с ретраями. Возвращает feed или None."""
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -126,12 +182,16 @@ class NewsParser:
                 if feed is None:
                     continue
 
+                source = NewsParser._source_name(url)
                 source_items = []
                 for entry in feed.entries[:20]:  # Берем последние 20 с каждого сайта
                     if NewsParser.is_relevant(entry.title, keywords):
                         source_items.append({
                             "title_en": entry.title,
-                            "url": entry.link
+                            "url": entry.link,
+                            "summary_en": NewsParser._clean_summary(entry.get("summary", "")),
+                            "image": NewsParser._extract_image(entry),
+                            "source": source,
                         })
 
                 all_items.extend(source_items)

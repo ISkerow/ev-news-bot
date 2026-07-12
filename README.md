@@ -10,6 +10,7 @@ Telegram bot that monitors EV industry news from RSS feeds (InsideEVs, Electrek,
 
 - **Resilient fetching** — 3 retries per feed with exponential backoff, 30s timeout, separate handling for timeouts, network errors, and malformed XML. One dead source never blocks the others.
 - **Translation fallback chain** — Google Translate → MyMemory → original English title. A translator outage never drops a post.
+- **Rich post cards** — cover image (RSS media tags with `og:image` fallback), translated summary, source attribution and hashtags; degrades gracefully to a text post if no image is available.
 - **Smart keyword filter** — case-insensitive word-boundary regex, so `ev` matches "EV sales" but not "every" or "level". Keywords live in `keywords.json` and are hot-reloaded each cycle — no restart needed.
 - **Deduplication** — SQLite (async via `aiosqlite`) keyed by article URL. Restarts and overlapping feeds never cause reposts.
 - **Rate-limited posting queue** — strict 60s interval between posts, safe against Telegram flood limits.
