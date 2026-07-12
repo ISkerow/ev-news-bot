@@ -8,6 +8,7 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.exceptions import TelegramRetryAfter
 
 import config
 from database import Database
@@ -27,6 +28,27 @@ class QueueManager:
         self.bot = bot
         self.db = db
         self.paused = False
+
+    async def _send_post(self, item: dict, text: str, kb):
+        """С обложкой — фото-пост, иначе текстовый. Флуд-лимит пробрасываем наверх."""
+        if item.get('image'):
+            try:
+                return await self.bot.send_photo(
+                    chat_id=config.CHANNEL_ID,
+                    photo=item['image'],
+                    caption=text,
+                    reply_markup=kb
+                )
+            except TelegramRetryAfter:
+                raise
+            except Exception as e:
+                logger.warning(f"Фото не отправилось ({e}), публикуем текстом")
+        return await self.bot.send_message(
+            chat_id=config.CHANNEL_ID,
+            text=text,
+            reply_markup=kb,
+            disable_web_page_preview=False
+        )
 
     async def worker(self):
         """Разгребает очередь по одной новости с жестким интервалом."""
@@ -66,25 +88,13 @@ class QueueManager:
                     parts.append("#EV #AutoNews" + (f" #{source_tag}" if source_tag else ""))
                     text = "\n\n".join(parts)
 
-                    # С обложкой — фото-пост; если фото не прошло — обычный текстовый
-                    msg = None
-                    if item.get('image'):
-                        try:
-                            msg = await self.bot.send_photo(
-                                chat_id=config.CHANNEL_ID,
-                                photo=item['image'],
-                                caption=text,
-                                reply_markup=kb
-                            )
-                        except Exception as e:
-                            logger.warning(f"Фото не отправилось ({e}), публикуем текстом")
-                    if msg is None:
-                        msg = await self.bot.send_message(
-                            chat_id=config.CHANNEL_ID,
-                            text=text,
-                            reply_markup=kb,
-                            disable_web_page_preview=False
-                        )
+                    # Флуд-лимит: Telegram сам называет паузу — ждём и повторяем один раз
+                    try:
+                        msg = await self._send_post(item, text, kb)
+                    except TelegramRetryAfter as e:
+                        logger.warning(f"Флуд-лимит Telegram: ждём {e.retry_after} сек и повторяем")
+                        await asyncio.sleep(e.retry_after + 1)
+                        msg = await self._send_post(item, text, kb)
 
                     await self.db.add_news(item['url'], title_ru, msg.message_id)
                     logger.info(f"✅ Опубликовано: {title_ru}")
