@@ -15,5 +15,6 @@ RSS_URLS = [
     "https://carnewschina.com/feed/"
 ]
 
-DB_NAME = "news_production.db"
+# Путь к базе; на хостинге с volume задаётся через env (например /data/news_production.db)
+DB_NAME = os.getenv("DB_PATH", "news_production.db")
 POST_DELAY = 60
