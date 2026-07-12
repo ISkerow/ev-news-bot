@@ -166,14 +166,15 @@ class NewsParser:
         return None
 
     @staticmethod
-    async def fetch_rss() -> list:
+    async def fetch_rss(keywords: list = None) -> list:
         ssl_ctx = ssl.create_default_context()
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = ssl.CERT_NONE
         headers = {"User-Agent": "Mozilla/5.0"}
 
         all_items = []
-        keywords = NewsParser.load_keywords()  # Загружаем свежие фильтры
+        if keywords is None:
+            keywords = NewsParser.load_keywords()  # Фоллбэк: слова из JSON-файла
 
         async with aiohttp.ClientSession(headers=headers) as session:
             for url in config.RSS_URLS:
