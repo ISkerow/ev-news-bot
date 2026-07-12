@@ -44,6 +44,7 @@ All secrets are set via environment variables (`.env` is supported):
 | `CHANNEL_ID`  | yes      | Target channel ID (e.g. `-1001234567890`); the bot must be an admin |
 | `ADMIN_ID`    | yes      | Telegram user ID allowed to run admin commands                     |
 | `MANAGER_URL` | no       | Link for the inline button under posts; omit to post without a button |
+| `DB_PATH`     | no       | Database file location (default `news_production.db`); point it at a mounted volume in production |
 
 Tuning lives in [config.py](config.py): RSS source list, posting interval (`POST_DELAY`), database name. Keyword filter is edited in [keywords.json](keywords.json) at runtime.
 
