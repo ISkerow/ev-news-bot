@@ -1,5 +1,6 @@
 # EV News Bot
 
+![Tests](https://github.com/ISkerow/ev-news-bot/actions/workflows/tests.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![aiogram](https://img.shields.io/badge/aiogram-3.x-2CA5E0)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -61,6 +62,15 @@ Tuning lives in [config.py](config.py): posting interval (`POST_DELAY`), databas
 ├── config.py         # env-based configuration
 ├── keywords.json     # keyword filter (hot-reloaded)
 └── requirements.txt
+```
+
+## Tests
+
+Unit tests cover the keyword filter, URL normalization, image extraction, quiet-hours logic and the whole database layer. They run on every push via GitHub Actions.
+
+```bash
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ## Deployment
