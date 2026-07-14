@@ -25,3 +25,19 @@ SOURCE_NAMES = {
 # Путь к базе; на хостинге с volume задаётся через env (например /data/news_production.db)
 DB_NAME = os.getenv("DB_PATH", "news_production.db")
 POST_DELAY = 60
+
+
+def _parse_quiet_hours(value: str):
+    """Разбирает строку вида "23-7" в пару часов; кривое значение = отключено."""
+    try:
+        start, end = value.split("-")
+        return int(start) % 24, int(end) % 24
+    except ValueError:
+        return None
+
+
+# Тихие часы: посты не выходят с QUIET[0]:00 до QUIET[1]:00 по времени TIMEZONE.
+# Пусто или не задано — публикуем круглосуточно.
+QUIET_HOURS = os.getenv("QUIET_HOURS", "")
+QUIET = _parse_quiet_hours(QUIET_HOURS) if QUIET_HOURS else None
+TIMEZONE = os.getenv("TIMEZONE", "UTC")  # IANA-имя, например Asia/Almaty
