@@ -14,6 +14,7 @@ Telegram bot that monitors EV industry news from RSS feeds (InsideEVs, Electrek,
 - **Smart keyword filter** — case-insensitive word-boundary regex, so `ev` matches "EV sales" but not "every" or "level". Keywords are stored in the database and editable from Telegram at runtime — no restart needed.
 - **Deduplication** — SQLite (async via `aiosqlite`) keyed by normalized article URL (tracking parameters like `utm_*` are stripped first). Restarts and overlapping feeds never cause reposts.
 - **Rate-limited posting queue** — strict 60s interval between posts; if Telegram ever responds with a flood limit, the bot waits exactly as long as Telegram asks and retries.
+- **Quiet hours** — optional do-not-disturb window (e.g. `23-7` in the channel's timezone): news queue up overnight and publish in the morning.
 - **Lead generation** — configurable inline button under every post (link to a manager / order page).
 - **Admin tools** — a control panel right in Telegram: `/stats` (posts, queue, filter status), `/keywords`, `/add_kw`, `/del_kw` (manage the filter live), `/sources`, `/add_source`, `/del_source` (manage RSS feeds live — a new feed is validated before it is saved), `/pause` / `/resume` (hold publishing without stopping the bot), `/delete_last` (remove the latest post from the channel and the database).
 
@@ -46,6 +47,8 @@ All secrets are set via environment variables (`.env` is supported):
 | `ADMIN_ID`    | yes      | Telegram user ID allowed to run admin commands                     |
 | `MANAGER_URL` | no       | Link for the inline button under posts; omit to post without a button |
 | `DB_PATH`     | no       | Database file location (default `news_production.db`); point it at a mounted volume in production |
+| `QUIET_HOURS` | no       | Do-not-disturb window as `start-end` hours, e.g. `23-7`; omit to post around the clock |
+| `TIMEZONE`    | no       | IANA timezone for quiet hours, e.g. `Asia/Almaty` (default `UTC`) |
 
 Tuning lives in [config.py](config.py): posting interval (`POST_DELAY`), database name. RSS sources and the keyword filter are managed from Telegram at runtime; `RSS_URLS` in [config.py](config.py) and [keywords.json](keywords.json) only seed the initial lists on first run.
 
