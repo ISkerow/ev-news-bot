@@ -2,6 +2,8 @@ import asyncio
 import html
 import logging
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -17,6 +19,26 @@ from parser import NewsParser
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 logger = logging.getLogger("NewsBot")
 
+# Часовой пояс для тихих часов; при опечатке в TIMEZONE не падаем, а работаем по UTC
+try:
+    TZ = ZoneInfo(config.TIMEZONE)
+except Exception:
+    logging.getLogger("NewsBot").warning(f"Неизвестный часовой пояс «{config.TIMEZONE}», используем UTC")
+    TZ = ZoneInfo("UTC")
+
+
+def is_quiet_now(hour: int = None) -> bool:
+    """Сейчас тихие часы? (hour подставляется в тестах)"""
+    if config.QUIET is None:
+        return False
+    if hour is None:
+        hour = datetime.now(TZ).hour
+    start, end = config.QUIET
+    if start <= end:  # дневное окно, например 13-17
+        return start <= hour < end
+    return hour >= start or hour < end  # окно через полночь, например 23-7
+
+
 bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
@@ -28,6 +50,7 @@ class QueueManager:
         self.bot = bot
         self.db = db
         self.paused = False
+        self._quiet_logged = False
 
     async def _send_post(self, item: dict, text: str, kb):
         """С обложкой — фото-пост, иначе текстовый. Флуд-лимит пробрасываем наверх."""
@@ -56,6 +79,13 @@ class QueueManager:
             if self.paused:
                 await asyncio.sleep(5)
                 continue
+            if is_quiet_now():
+                if not self._quiet_logged:
+                    logger.info(f"🌙 Тихие часы ({config.QUIET_HOURS}) — новости копятся в очереди")
+                    self._quiet_logged = True
+                await asyncio.sleep(60)
+                continue
+            self._quiet_logged = False
             item = await self.queue.get()
             try:
                 if not await self.db.url_exists(item['url']):
@@ -117,7 +147,12 @@ async def cmd_stats(message: types.Message):
         return
     stats = await db.get_stats()
     keywords = await db.get_keywords()
-    status = "⏸ на паузе" if queue_manager.paused else "▶️ активна"
+    if queue_manager.paused:
+        status = "⏸ на паузе"
+    elif is_quiet_now():
+        status = f"🌙 тихие часы ({config.QUIET_HOURS})"
+    else:
+        status = "▶️ активна"
     await message.answer(
         f"📊 <b>Статистика</b>\n\n"
         f"Всего опубликовано: {stats['total']}\n"
