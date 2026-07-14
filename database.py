@@ -69,7 +69,8 @@ class Database:
     async def get_last_post(self):
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM sent_news ORDER BY posted_at DESC LIMIT 1")
+            # rowid — добивка на случай двух записей в одну секунду
+            cursor = await db.execute("SELECT * FROM sent_news ORDER BY posted_at DESC, rowid DESC LIMIT 1")
             return await cursor.fetchone()
 
     async def delete_post_from_db(self, url: str):
