@@ -160,6 +160,54 @@ async def cmd_del_kw(message: types.Message, command: CommandObject):
     else:
         await message.answer(f"«{word}» нет в списке.")
 
+@router.message(Command("sources"))
+async def cmd_sources(message: types.Message):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    sources = await db.get_sources()
+    if not sources:
+        return await message.answer("Список источников пуст.")
+    lines = [f"{i}. {html.escape(u)}" for i, u in enumerate(sources, 1)]
+    await message.answer("📰 Источники:\n" + "\n".join(lines), disable_web_page_preview=True)
+
+@router.message(Command("add_source"))
+async def cmd_add_source(message: types.Message, command: CommandObject):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    if not command.args:
+        return await message.answer("Использование: /add_source https://site.com/feed/")
+    url = command.args.strip()
+    if not url.startswith("http"):
+        url = "https://" + url
+    entries = await NewsParser.check_feed(url)
+    if entries is None:
+        return await message.answer(
+            "⚠️ По этой ссылке не нашлась рабочая RSS-лента — источник не добавлен.\n"
+            "Проверьте адрес: обычно лента живёт на /feed/ или /rss/."
+        )
+    if await db.add_source(url):
+        await message.answer(f"✅ Источник добавлен и проверен: лента отдаёт {entries} записей.")
+    else:
+        await message.answer("Этот источник уже в списке.")
+
+@router.message(Command("del_source"))
+async def cmd_del_source(message: types.Message, command: CommandObject):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    arg = (command.args or "").strip()
+    if not arg:
+        return await message.answer("Использование: /del_source номер из /sources (или URL целиком)")
+    if arg.isdigit():
+        sources = await db.get_sources()
+        idx = int(arg)
+        if not 1 <= idx <= len(sources):
+            return await message.answer("Нет источника с таким номером — сверьтесь со /sources.")
+        arg = sources[idx - 1]
+    if await db.remove_source(arg):
+        await message.answer(f"🗑 Источник удалён: {html.escape(arg)}", disable_web_page_preview=True)
+    else:
+        await message.answer("Такого источника нет в списке.")
+
 @router.message(Command("pause"))
 async def cmd_pause(message: types.Message):
     if message.from_user.id != config.ADMIN_ID:
@@ -194,7 +242,8 @@ async def scheduled_parser():
     while True:
         logger.info("🔍 Запуск парсинга RSS...")
         keywords = await db.get_keywords()
-        news = await NewsParser.fetch_rss(keywords)
+        sources = await db.get_sources()
+        news = await NewsParser.fetch_rss(keywords, sources)
         added = 0
         for item in news:
             if not await db.url_exists(item['url']):
@@ -205,8 +254,9 @@ async def scheduled_parser():
 
 async def main():
     await db.init_db()
-    # Первый запуск: переносим стартовые слова из keywords.json в базу
+    # Первый запуск: переносим стартовые слова и источники в базу
     await db.seed_keywords(NewsParser.load_keywords())
+    await db.seed_sources(config.RSS_URLS)
     dp.include_router(router)
     
     asyncio.create_task(queue_manager.worker())

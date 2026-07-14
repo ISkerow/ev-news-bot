@@ -21,6 +21,16 @@ RETRY_BASE_DELAY = 2   # задержка растёт экспоненциал�
 # Трекинговые параметры, не влияющие на содержимое страницы
 TRACKING_PARAMS = {"fbclid", "gclid", "yclid", "igshid", "mc_cid", "mc_eid", "ref"}
 
+# Полноценный браузерный User-Agent: куцый "Mozilla/5.0" некоторые сайты
+# (например, за Cloudflare) отсекают как бота и отвечают 403
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+}
+
 
 class NewsParser:
     @staticmethod
@@ -116,13 +126,33 @@ class NewsParser:
         return None
 
     @staticmethod
+    async def check_feed(url: str) -> int | None:
+        """Быстрая проверка для /add_source: рабочая ли это RSS-лента.
+        Возвращает число записей в ленте или None, если лента не читается."""
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        try:
+            async with aiohttp.ClientSession(headers=HEADERS) as session:
+                async with session.get(url, ssl=ssl_ctx, timeout=15) as resp:
+                    if resp.status != 200:
+                        return None
+                    content = await resp.text()
+            feed = feedparser.parse(content)
+            if feed.entries:
+                return len(feed.entries)
+        except Exception as e:
+            logger.warning(f"Проверка ленты {url} не удалась: {e}")
+        return None
+
+    @staticmethod
     async def fetch_og_image(article_url: str) -> str | None:
         """Достаёт обложку (og:image) со страницы статьи — для лент без картинок в RSS."""
         ssl_ctx = ssl.create_default_context()
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = ssl.CERT_NONE
         try:
-            async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
+            async with aiohttp.ClientSession(headers=HEADERS) as session:
                 async with session.get(article_url, ssl=ssl_ctx, timeout=15) as resp:
                     if resp.status != 200:
                         return None
@@ -180,18 +210,19 @@ class NewsParser:
         return None
 
     @staticmethod
-    async def fetch_rss(keywords: list = None) -> list:
+    async def fetch_rss(keywords: list = None, urls: list = None) -> list:
         ssl_ctx = ssl.create_default_context()
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = ssl.CERT_NONE
-        headers = {"User-Agent": "Mozilla/5.0"}
 
         all_items = []
         if keywords is None:
             keywords = NewsParser.load_keywords()  # Фоллбэк: слова из JSON-файла
+        if urls is None:
+            urls = config.RSS_URLS  # Фоллбэк: список из конфига
 
-        async with aiohttp.ClientSession(headers=headers) as session:
-            for url in config.RSS_URLS:
+        async with aiohttp.ClientSession(headers=HEADERS) as session:
+            for url in urls:
                 logger.info(f"Парсинг источника: {url}")
                 feed = await NewsParser._fetch_feed(session, url, ssl_ctx)
                 if feed is None:
