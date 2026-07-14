@@ -16,6 +16,7 @@ class Database:
                 )
             """)
             await db.execute("CREATE TABLE IF NOT EXISTS keywords (word TEXT PRIMARY KEY)")
+            await db.execute("CREATE TABLE IF NOT EXISTS sources (url TEXT PRIMARY KEY)")
             await db.commit()
 
     # --- Ключевые слова (живут в базе, чтобы переживать редеплой) ---
@@ -75,6 +76,40 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("DELETE FROM sent_news WHERE url = ?", (url,))
             await db.commit()
+
+    # --- RSS-источники (тоже в базе — редактируются из Telegram) ---
+
+    async def seed_sources(self, urls: list):
+        """Одноразовое заполнение: если таблица пуста, кладём стартовый список."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM sources")
+            if (await cursor.fetchone())[0] == 0 and urls:
+                await db.executemany(
+                    "INSERT OR IGNORE INTO sources (url) VALUES (?)",
+                    [(u.strip(),) for u in urls]
+                )
+                await db.commit()
+
+    async def get_sources(self) -> list:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT url FROM sources ORDER BY url")
+            return [row[0] for row in await cursor.fetchall()]
+
+    async def add_source(self, url: str) -> bool:
+        """Возвращает False, если источник уже был в списке."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "INSERT OR IGNORE INTO sources (url) VALUES (?)", (url.strip(),)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def remove_source(self, url: str) -> bool:
+        """Возвращает False, если такого источника не было."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("DELETE FROM sources WHERE url = ?", (url.strip(),))
+            await db.commit()
+            return cursor.rowcount > 0
 
     # НОВЫЙ МЕТОД ДЛЯ АДМИНКИ
     async def get_stats(self):
