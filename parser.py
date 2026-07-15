@@ -130,6 +130,65 @@ class NewsParser:
             return img["src"]
         return None
 
+    # Промпт жёстко запрещает додумывание: новости — не место для галлюцинаций
+    REWRITE_PROMPT = (
+        "Ты редактор Telegram-канала об электромобилях. Перепиши заголовок и "
+        "описание новости на русском языке в живом новостном стиле.\n\n"
+        "Жёсткие правила:\n"
+        "- Используй ТОЛЬКО факты из текста ниже. Ничего не добавляй и не додумывай.\n"
+        "- Если факта нет в тексте — его нет и в твоём ответе.\n"
+        "- Заголовок: до 90 символов. Описание: 1-2 предложения, до 250 символов.\n"
+        "- Без эмодзи, без хэштегов.\n\n"
+        "Заголовок: {title}\n"
+        "Описание: {summary}\n\n"
+        'Ответ строго в JSON: {{"title": "...", "summary": "..."}}'
+    )
+
+    @staticmethod
+    async def rewrite_with_ai(title: str, summary: str) -> dict | None:
+        """Рерайт поста через Gemini. Возвращает {'title', 'summary'} по-русски
+        или None — тогда сработает обычная цепочка перевода."""
+        if not config.GEMINI_API_KEY:
+            return None
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{config.GEMINI_MODEL}:generateContent"
+        )
+        payload = {
+            "contents": [{"parts": [{"text": NewsParser.REWRITE_PROMPT.format(
+                title=title, summary=summary or "(нет)")}]}],
+            "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 400,
+                "responseMimeType": "application/json",
+            },
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url, json=payload, ssl=SSL_CONTEXT, timeout=30,
+                    headers={"x-goog-api-key": config.GEMINI_API_KEY},
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Gemini ответил {resp.status}, используем перевод")
+                        return None
+                    data = await resp.json()
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if text.startswith("```"):  # на случай, если модель обернула ответ в код-блок
+                text = text.strip("`").removeprefix("json").strip()
+            result = json.loads(text)
+            title_ru = (result.get("title") or "").strip()
+            if not title_ru:
+                return None
+            logger.info("Пост обработан через Gemini")
+            return {
+                "title": title_ru[:200],
+                "summary": (result.get("summary") or "").strip()[:300],
+            }
+        except Exception as e:
+            logger.warning(f"Gemini-рерайт не удался ({e}), используем перевод")
+            return None
+
     @staticmethod
     async def check_feed(url: str) -> int | None:
         """Быстрая проверка для /add_source: рабочая ли это RSS-лента.
