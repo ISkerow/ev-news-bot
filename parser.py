@@ -4,6 +4,7 @@ import json
 import asyncio
 import logging
 import functools
+from datetime import datetime, timezone
 import aiohttp
 import certifi
 import feedparser
@@ -89,6 +90,36 @@ class NewsParser:
             return False
         # Границы слов: "ev" совпадёт в "EV sales", но не в "every" или "level"
         return bool(NewsParser._build_pattern(tuple(keywords)).search(title))
+
+    @staticmethod
+    def _parse_published(entry):
+        """Дата публикации записи в UTC или None, если лента её не отдаёт."""
+        parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+        if not parsed:
+            return None
+        return datetime(*parsed[:6], tzinfo=timezone.utc)
+
+    @staticmethod
+    def is_too_old(published) -> bool:
+        """Новость старше MAX_NEWS_AGE_HOURS? Без даты считаем свежей."""
+        if not config.MAX_NEWS_AGE_HOURS or published is None:
+            return False
+        age = datetime.now(timezone.utc) - published
+        return age.total_seconds() > config.MAX_NEWS_AGE_HOURS * 3600
+
+    @staticmethod
+    def title_similarity(a: str, b: str) -> float:
+        """Похожесть заголовков 0..1 по пересечению значимых слов.
+        Ловит одну историю с разных сайтов: 'Tesla cuts Model 3 prices in China'
+        и 'Tesla Model 3 price cut hits China' дадут > 0.5."""
+        def words(text):
+            raw = re.findall(r"[a-zа-яё0-9]+", text.lower())
+            # грубое приведение множественного числа: prices -> price
+            return {w[:-1] if w.endswith("s") else w for w in raw if len(w) > 2}
+        wa, wb = words(a), words(b)
+        if not wa or not wb:
+            return 0.0
+        return len(wa & wb) / len(wa | wb)
 
     @staticmethod
     def _clean_url(url: str) -> str:
@@ -289,17 +320,28 @@ class NewsParser:
                 source = NewsParser._source_name(url)
                 source_items = []
                 for entry in feed.entries[:20]:  # Берем последние 20 с каждого сайта
-                    if NewsParser.is_relevant(entry.title, keywords):
-                        source_items.append({
-                            "title_en": entry.title,
-                            "url": NewsParser._clean_url(entry.link),
-                            "summary_en": NewsParser._clean_summary(entry.get("summary", "")),
-                            "image": NewsParser._extract_image(entry),
-                            "source": source,
-                        })
+                    if not NewsParser.is_relevant(entry.title, keywords):
+                        continue
+                    published = NewsParser._parse_published(entry)
+                    if NewsParser.is_too_old(published):
+                        continue  # протухшее не берём вообще
+                    summary = NewsParser._clean_summary(entry.get("summary", ""))
+                    # Некоторые ленты кладут в описание копию заголовка — не дублируем
+                    if summary.rstrip(".…").lower() == entry.title.rstrip(".…").lower():
+                        summary = ""
+                    source_items.append({
+                        "title_en": entry.title,
+                        "url": NewsParser._clean_url(entry.link),
+                        "summary_en": summary,
+                        "image": NewsParser._extract_image(entry),
+                        "source": source,
+                        "published": published,
+                    })
 
                 all_items.extend(source_items)
                 logger.info(f"Найдено {len(source_items)} подходящих новостей на {url}")
 
-        # Разворачиваем, чтобы старые шли первыми в очередь
-        return list(reversed(all_items))
+        # Свежие вперёд; новости без даты — в конец
+        epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        all_items.sort(key=lambda i: i["published"] or epoch, reverse=True)
+        return all_items
