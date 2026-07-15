@@ -17,6 +17,11 @@ class Database:
             """)
             await db.execute("CREATE TABLE IF NOT EXISTS keywords (word TEXT PRIMARY KEY)")
             await db.execute("CREATE TABLE IF NOT EXISTS sources (url TEXT PRIMARY KEY)")
+            # Миграция для старых баз: колонка появилась позже самой таблицы
+            try:
+                await db.execute("ALTER TABLE sent_news ADD COLUMN title_en TEXT")
+            except aiosqlite.OperationalError:
+                pass  # колонка уже есть
             await db.commit()
 
     # --- Ключевые слова (живут в базе, чтобы переживать редеплой) ---
@@ -60,11 +65,20 @@ class Database:
             cursor = await db.execute("SELECT 1 FROM sent_news WHERE url = ?", (url,))
             return await cursor.fetchone() is not None
 
-    async def add_news(self, url: str, title: str, message_id: int):
+    async def add_news(self, url: str, title: str, message_id: int, title_en: str = None):
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("INSERT OR IGNORE INTO sent_news (url, title, message_id) VALUES (?, ?, ?)",
-                             (url, title, message_id))
+            await db.execute(
+                "INSERT OR IGNORE INTO sent_news (url, title, message_id, title_en) VALUES (?, ?, ?, ?)",
+                (url, title, message_id, title_en))
             await db.commit()
+
+    async def get_recent_titles(self, since_utc: str) -> list:
+        """Английские заголовки постов после since_utc — для дедупликации историй."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT title_en FROM sent_news WHERE posted_at >= ? AND title_en IS NOT NULL",
+                (since_utc,))
+            return [row[0] for row in await cursor.fetchall()]
 
     async def get_last_post(self):
         async with aiosqlite.connect(self.db_path) as db:

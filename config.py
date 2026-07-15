@@ -51,3 +51,9 @@ try:
     MAX_POSTS_PER_DAY = int(os.getenv("MAX_POSTS_PER_DAY", "0"))
 except ValueError:
     MAX_POSTS_PER_DAY = 0
+
+# Не публиковать новости старше N часов; 0 — без ограничения
+try:
+    MAX_NEWS_AGE_HOURS = int(os.getenv("MAX_NEWS_AGE_HOURS", "24"))
+except ValueError:
+    MAX_NEWS_AGE_HOURS = 24

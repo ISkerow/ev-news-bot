@@ -1,8 +1,9 @@
 import asyncio
 import html
+import itertools
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types, Router
 from aiogram.client.default import DefaultBotProperties
@@ -52,12 +53,36 @@ db = Database(config.DB_NAME)
 
 class QueueManager:
     def __init__(self, bot: Bot, db: Database):
-        self.queue = asyncio.Queue()
+        # PriorityQueue: свежие новости публикуются раньше залежавшихся
+        self.queue = asyncio.PriorityQueue()
+        self._counter = itertools.count()  # разрыв ничьей, чтобы не сравнивать dict'ы
+        self.pending = set()   # URL уже в очереди — повторно не кладём
+        self.skipped = set()   # URL, отброшенные как дубль истории
         self.bot = bot
         self.db = db
         self.paused = False
         self._quiet_logged = False
         self._limit_logged = False
+
+    def put_news(self, item: dict) -> bool:
+        """Кладёт новость в очередь (свежие вперёд). False — уже там или отброшена."""
+        url = item['url']
+        if url in self.pending or url in self.skipped:
+            return False
+        published = item.get('published') or datetime.now(timezone.utc)
+        self.pending.add(url)
+        self.queue.put_nowait((-published.timestamp(), next(self._counter), item))
+        return True
+
+    async def _is_duplicate_story(self, item: dict) -> bool:
+        """Та же история уже выходила с другого сайта? Сравниваем заголовки за 48 часов."""
+        since = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime('%Y-%m-%d %H:%M:%S')
+        for title in await self.db.get_recent_titles(since):
+            if NewsParser.title_similarity(item['title_en'], title) >= 0.5:
+                self.skipped.add(item['url'])
+                logger.info(f"Пропуск дубля истории: «{item['title_en'][:60]}» ≈ «{title[:60]}»")
+                return True
+        return False
 
     async def _send_post(self, item: dict, text: str, kb):
         """С обложкой — фото-пост, иначе текстовый. Флуд-лимит пробрасываем наверх."""
@@ -102,10 +127,15 @@ class QueueManager:
                     await asyncio.sleep(600)
                     continue
                 self._limit_logged = False
-            item = await self.queue.get()
+            _, _, item = await self.queue.get()
             attempted = False  # была ли реальная отправка (дубликаты не тормозят очередь)
             try:
-                if not await self.db.url_exists(item['url']):
+                # Пока новость ждала в очереди, она могла протухнуть
+                if NewsParser.is_too_old(item.get('published')):
+                    logger.info(f"Пропуск устаревшей новости: {item['title_en'][:70]}")
+                elif await self._is_duplicate_story(item):
+                    pass  # лог внутри; URL добавлен в skipped
+                elif not await self.db.url_exists(item['url']):
                     attempted = True
                     # Если в RSS не было картинки — пробуем взять og:image со страницы статьи
                     if not item.get('image'):
@@ -137,10 +167,14 @@ class QueueManager:
                     parts = [f"<b>{html.escape(title_ru, quote=False)}</b>"]
                     if summary_ru:
                         parts.append(html.escape(summary_ru, quote=False))
-                    footer = f"<a href='{item['url']}'>Читать оригинал</a>"
+                    footer_parts = []
                     if source:
-                        footer = f"📰 {source} · {footer}"
-                    parts.append(footer)
+                        footer_parts.append(f"📰 {source}")
+                    if item.get('published'):
+                        mins = int((datetime.now(timezone.utc) - item['published']).total_seconds() // 60)
+                        footer_parts.append(f"{mins} мин назад" if mins < 60 else f"{mins // 60} ч назад")
+                    footer_parts.append(f"<a href='{item['url']}'>Читать оригинал</a>")
+                    parts.append(" · ".join(footer_parts))
                     source_tag = ''.join(c for c in source if c.isalnum())
                     parts.append("#EV #AutoNews" + (f" #{source_tag}" if source_tag else ""))
                     text = "\n\n".join(parts)
@@ -153,11 +187,12 @@ class QueueManager:
                         await asyncio.sleep(e.retry_after + 1)
                         msg = await self._send_post(item, text, kb)
 
-                    await self.db.add_news(item['url'], title_ru, msg.message_id)
+                    await self.db.add_news(item['url'], title_ru, msg.message_id, item['title_en'])
                     logger.info(f"✅ Опубликовано: {title_ru}")
             except Exception as e:
                 logger.error(f"Ошибка публикации: {e}")
             finally:
+                self.pending.discard(item['url'])
                 self.queue.task_done()
                 # Интервал держим после каждой попытки отправки (успех или ошибка),
                 # а пропущенные дубликаты очередь не тормозят
@@ -311,8 +346,7 @@ async def scheduled_parser():
         news = await NewsParser.fetch_rss(keywords, sources)
         added = 0
         for item in news:
-            if not await db.url_exists(item['url']):
-                await queue_manager.queue.put(item)
+            if not await db.url_exists(item['url']) and queue_manager.put_news(item):
                 added += 1
         logger.info(f"✅ Найдено новых целевых новостей: {added}")
         await asyncio.sleep(1800)
