@@ -37,6 +37,12 @@ async def test_get_stats_counts(db):
     assert stats["total"] == 2
     assert stats["today"] == 2
 
+async def test_get_stats_respects_today_start(db):
+    await db.add_news("https://a.com/1", "Один", 1)
+    stats = await db.get_stats(today_start="2999-01-01 00:00:00")
+    assert stats["total"] == 1
+    assert stats["today"] == 0  # граница «сегодня» в будущем — за сегодня ничего
+
 
 # --- Ключевые слова ---
 

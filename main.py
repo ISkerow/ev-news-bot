@@ -2,7 +2,7 @@ import asyncio
 import html
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types, Router
 from aiogram.client.default import DefaultBotProperties
@@ -87,16 +87,19 @@ class QueueManager:
                 continue
             self._quiet_logged = False
             item = await self.queue.get()
+            attempted = False  # была ли реальная отправка (дубликаты не тормозят очередь)
             try:
                 if not await self.db.url_exists(item['url']):
+                    attempted = True
                     # Если в RSS не было картинки — пробуем взять og:image со страницы статьи
                     if not item.get('image'):
                         item['image'] = await NewsParser.fetch_og_image(item['url'])
 
-                    title_ru = NewsParser.translate_title(item['title_en'])
+                    # Переводчик синхронный (requests) — уводим в поток, чтобы не морозить event loop
+                    title_ru = await asyncio.to_thread(NewsParser.translate_title, item['title_en'])
                     summary_ru = ""
                     if item.get('summary_en'):
-                        summary_ru = NewsParser.translate_title(item['summary_en'])
+                        summary_ru = await asyncio.to_thread(NewsParser.translate_title, item['summary_en'])
 
                     # Кнопка лидогенерации; без MANAGER_URL пост уходит без кнопки
                     kb = None
@@ -132,8 +135,10 @@ class QueueManager:
                 logger.error(f"Ошибка публикации: {e}")
             finally:
                 self.queue.task_done()
-                # ИСПРАВЛЕНО: Таймер в блоке finally. Интервал выдерживается всегда.
-                await asyncio.sleep(config.POST_DELAY)
+                # Интервал держим после каждой попытки отправки (успех или ошибка),
+                # а пропущенные дубликаты очередь не тормозят
+                if attempted:
+                    await asyncio.sleep(config.POST_DELAY)
 
 queue_manager = QueueManager(bot, db)
 
@@ -145,7 +150,9 @@ async def cmd_start(message: types.Message):
 async def cmd_stats(message: types.Message):
     if message.from_user.id != config.ADMIN_ID:
         return
-    stats = await db.get_stats()
+    # «Сегодня» считаем от полуночи в TIMEZONE, переведённой в UTC (как хранит база)
+    day_start = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+    stats = await db.get_stats(day_start.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
     keywords = await db.get_keywords()
     if queue_manager.paused:
         status = "⏸ на паузе"
