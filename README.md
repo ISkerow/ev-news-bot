@@ -53,6 +53,7 @@ All secrets are set via environment variables (`.env` is supported):
 | `TIMEZONE`    | no       | IANA timezone for quiet hours, e.g. `Asia/Almaty` (default `UTC`) |
 | `GEMINI_API_KEY` | no    | Enables AI rewrite of posts ([aistudio.google.com](https://aistudio.google.com)); unset = plain translation |
 | `GEMINI_MODEL` | no      | Gemini model for the rewrite (default `gemini-2.5-flash`) |
+| `MAX_POSTS_PER_DAY` | no | Daily post cap counted per `TIMEZONE` day; unset = unlimited |
 
 Tuning lives in [config.py](config.py): posting interval (`POST_DELAY`), database name. RSS sources and the keyword filter are managed from Telegram at runtime; `RSS_URLS` in [config.py](config.py) and [keywords.json](keywords.json) only seed the initial lists on first run.
 

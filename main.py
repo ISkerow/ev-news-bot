@@ -27,6 +27,12 @@ except Exception:
     TZ = ZoneInfo("UTC")
 
 
+def today_start_utc() -> str:
+    """Начало сегодняшнего дня в TIMEZONE, переведённое в UTC (формат как в базе)."""
+    day_start = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+    return day_start.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+
 def is_quiet_now(hour: int = None) -> bool:
     """Сейчас тихие часы? (hour подставляется в тестах)"""
     if config.QUIET is None:
@@ -51,6 +57,7 @@ class QueueManager:
         self.db = db
         self.paused = False
         self._quiet_logged = False
+        self._limit_logged = False
 
     async def _send_post(self, item: dict, text: str, kb):
         """С обложкой — фото-пост, иначе текстовый. Флуд-лимит пробрасываем наверх."""
@@ -86,6 +93,15 @@ class QueueManager:
                 await asyncio.sleep(60)
                 continue
             self._quiet_logged = False
+            if config.MAX_POSTS_PER_DAY > 0:
+                stats = await self.db.get_stats(today_start_utc())
+                if stats['today'] >= config.MAX_POSTS_PER_DAY:
+                    if not self._limit_logged:
+                        logger.info(f"Дневной лимит ({config.MAX_POSTS_PER_DAY} постов) исчерпан — ждём завтра")
+                        self._limit_logged = True
+                    await asyncio.sleep(600)
+                    continue
+                self._limit_logged = False
             item = await self.queue.get()
             attempted = False  # была ли реальная отправка (дубликаты не тормозят очередь)
             try:
@@ -158,9 +174,7 @@ async def cmd_start(message: types.Message):
 async def cmd_stats(message: types.Message):
     if message.from_user.id != config.ADMIN_ID:
         return
-    # «Сегодня» считаем от полуночи в TIMEZONE, переведённой в UTC (как хранит база)
-    day_start = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
-    stats = await db.get_stats(day_start.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+    stats = await db.get_stats(today_start_utc())
     keywords = await db.get_keywords()
     if queue_manager.paused:
         status = "⏸ на паузе"
@@ -171,7 +185,8 @@ async def cmd_stats(message: types.Message):
     await message.answer(
         f"📊 <b>Статистика</b>\n\n"
         f"Всего опубликовано: {stats['total']}\n"
-        f"Сегодня: {stats['today']}\n"
+        f"Сегодня: {stats['today']}"
+        + (f" из {config.MAX_POSTS_PER_DAY}" if config.MAX_POSTS_PER_DAY else "") + "\n"
         f"В очереди: {queue_manager.queue.qsize()}\n"
         f"Ключевых слов: {len(keywords)}\n"
         f"Публикация: {status}"
