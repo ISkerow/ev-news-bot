@@ -95,11 +95,19 @@ class QueueManager:
                     if not item.get('image'):
                         item['image'] = await NewsParser.fetch_og_image(item['url'])
 
-                    # Переводчик синхронный (requests) — уводим в поток, чтобы не морозить event loop
-                    title_ru = await asyncio.to_thread(NewsParser.translate_title, item['title_en'])
-                    summary_ru = ""
-                    if item.get('summary_en'):
-                        summary_ru = await asyncio.to_thread(NewsParser.translate_title, item['summary_en'])
+                    # Цепочка: ИИ-рерайт (если настроен) → обычный перевод
+                    rewritten = await NewsParser.rewrite_with_ai(
+                        item['title_en'], item.get('summary_en', '')
+                    )
+                    if rewritten:
+                        title_ru = rewritten['title']
+                        summary_ru = rewritten['summary']
+                    else:
+                        # Переводчик синхронный (requests) — уводим в поток, чтобы не морозить event loop
+                        title_ru = await asyncio.to_thread(NewsParser.translate_title, item['title_en'])
+                        summary_ru = ""
+                        if item.get('summary_en'):
+                            summary_ru = await asyncio.to_thread(NewsParser.translate_title, item['summary_en'])
 
                     # Кнопка лидогенерации; без MANAGER_URL пост уходит без кнопки
                     kb = None

@@ -10,6 +10,7 @@ Telegram bot that monitors EV industry news from RSS feeds (InsideEVs, Electrek,
 ## Features
 
 - **Resilient fetching** — 3 retries per feed with exponential backoff, 30s timeout, separate handling for timeouts, network errors, and malformed XML. One dead source never blocks the others.
+- **AI content rewrite (optional)** — with a `GEMINI_API_KEY` set, titles and summaries are rewritten into natural Russian news style by Gemini, with a strict no-invention prompt (facts from the source text only). Without the key — or if the API fails — the bot falls back to plain translation.
 - **Translation fallback chain** — Google Translate → MyMemory → original English title. A translator outage never drops a post.
 - **Rich post cards** — cover image (RSS media tags with `og:image` fallback), translated summary, source attribution and hashtags; degrades gracefully to a text post if no image is available.
 - **Smart keyword filter** — case-insensitive word-boundary regex, so `ev` matches "EV sales" but not "every" or "level". Keywords are stored in the database and editable from Telegram at runtime — no restart needed.
@@ -50,6 +51,8 @@ All secrets are set via environment variables (`.env` is supported):
 | `DB_PATH`     | no       | Database file location (default `news_production.db`); point it at a mounted volume in production |
 | `QUIET_HOURS` | no       | Do-not-disturb window as `start-end` hours, e.g. `23-7`; omit to post around the clock |
 | `TIMEZONE`    | no       | IANA timezone for quiet hours, e.g. `Asia/Almaty` (default `UTC`) |
+| `GEMINI_API_KEY` | no    | Enables AI rewrite of posts ([aistudio.google.com](https://aistudio.google.com)); unset = plain translation |
+| `GEMINI_MODEL` | no      | Gemini model for the rewrite (default `gemini-2.5-flash`) |
 
 Tuning lives in [config.py](config.py): posting interval (`POST_DELAY`), database name. RSS sources and the keyword filter are managed from Telegram at runtime; `RSS_URLS` in [config.py](config.py) and [keywords.json](keywords.json) only seed the initial lists on first run.
 
