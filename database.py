@@ -1,5 +1,5 @@
 import aiosqlite
-from datetime import datetime
+from datetime import datetime, timezone
 
 class Database:
     def __init__(self, db_path: str):
@@ -113,18 +113,20 @@ class Database:
             return cursor.rowcount > 0
 
     # НОВЫЙ МЕТОД ДЛЯ АДМИНКИ
-    async def get_stats(self):
-        """Возвращает статистику по базе данных."""
+    async def get_stats(self, today_start: str = None):
+        """Статистика. today_start — начало «сегодня» в UTC ('YYYY-MM-DD HH:MM:SS'),
+        потому что posted_at хранится в UTC; по умолчанию — полночь по UTC."""
+        if today_start is None:
+            today_start = datetime.now(timezone.utc).strftime('%Y-%m-%d 00:00:00')
         async with aiosqlite.connect(self.db_path) as db:
             # 1. Всего новостей
             cursor = await db.execute("SELECT COUNT(*) FROM sent_news")
             total_count = (await cursor.fetchone())[0]
 
             # 2. Новости за сегодня
-            today_date = datetime.now().strftime('%Y-%m-%d')
             cursor = await db.execute(
-                "SELECT COUNT(*) FROM sent_news WHERE date(posted_at) = ?",
-                (today_date,)
+                "SELECT COUNT(*) FROM sent_news WHERE posted_at >= ?",
+                (today_start,)
             )
             today_count = (await cursor.fetchone())[0]
 
