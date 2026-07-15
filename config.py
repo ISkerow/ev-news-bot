@@ -41,3 +41,7 @@ def _parse_quiet_hours(value: str):
 QUIET_HOURS = os.getenv("QUIET_HOURS", "")
 QUIET = _parse_quiet_hours(QUIET_HOURS) if QUIET_HOURS else None
 TIMEZONE = os.getenv("TIMEZONE", "UTC")  # IANA-имя, например Asia/Almaty
+
+# ИИ-рерайт постов: ключ задан — включён, не задан — обычный перевод
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
