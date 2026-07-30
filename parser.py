@@ -23,6 +23,14 @@ RETRY_BASE_DELAY = 2   # задержка растёт экспоненциал�
 # Трекинговые параметры, не влияющие на содержимое страницы
 TRACKING_PARAMS = {"fbclid", "gclid", "yclid", "igshid", "mc_cid", "mc_eid", "ref"}
 
+# Служебные слова: в сравнении заголовков смысла не несут
+STOP_WORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "its", "are", "was",
+    "were", "has", "have", "will", "but", "not", "new", "now", "after", "before",
+    "into", "over", "out", "off", "how", "why", "what", "who", "all", "more",
+    "than", "then", "you", "your", "here", "there", "say", "said", "get", "got",
+}
+
 # Проверка SSL-сертификатов включена; certifi даёт свежий набор корневых CA
 # независимо от настроек системы (на macOS у Python его часто нет)
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
@@ -100,22 +108,25 @@ class NewsParser:
         return datetime(*parsed[:6], tzinfo=timezone.utc)
 
     @staticmethod
-    def is_too_old(published) -> bool:
-        """Новость старше MAX_NEWS_AGE_HOURS? Без даты считаем свежей."""
+    def is_too_old(published, extra_hours: int = 0) -> bool:
+        """Новость старше MAX_NEWS_AGE_HOURS? Без даты считаем свежей.
+        extra_hours — запас для новостей, уже стоящих в очереди: они успели
+        пройти фильтр при парсинге и не должны молча пропадать из-за ожидания."""
         if not config.MAX_NEWS_AGE_HOURS or published is None:
             return False
         age = datetime.now(timezone.utc) - published
-        return age.total_seconds() > config.MAX_NEWS_AGE_HOURS * 3600
+        return age.total_seconds() > (config.MAX_NEWS_AGE_HOURS + extra_hours) * 3600
 
     @staticmethod
     def title_similarity(a: str, b: str) -> float:
         """Похожесть заголовков 0..1 по пересечению значимых слов.
-        Ловит одну историю с разных сайтов: 'Tesla cuts Model 3 prices in China'
-        и 'Tesla Model 3 price cut hits China' дадут > 0.5."""
+        Служебные слова выбрасываем — иначе они раздувают знаменатель и
+        одинаковые истории выглядят непохожими."""
         def words(text):
             raw = re.findall(r"[a-zа-яё0-9]+", text.lower())
             # грубое приведение множественного числа: prices -> price
-            return {w[:-1] if w.endswith("s") else w for w in raw if len(w) > 2}
+            stemmed = {w[:-1] if w.endswith("s") else w for w in raw if len(w) > 2}
+            return stemmed - STOP_WORDS
         wa, wb = words(a), words(b)
         if not wa or not wb:
             return 0.0
@@ -176,9 +187,8 @@ class NewsParser:
     )
 
     @staticmethod
-    async def rewrite_with_ai(title: str, summary: str) -> dict | None:
-        """Рерайт поста через Gemini. Возвращает {'title', 'summary'} по-русски
-        или None — тогда сработает обычная цепочка перевода."""
+    async def _gemini_request(prompt: str, max_tokens: int, temperature: float = 0.1) -> str | None:
+        """Один запрос к Gemini. Возвращает текст ответа или None при любой проблеме."""
         if not config.GEMINI_API_KEY:
             return None
         url = (
@@ -186,11 +196,10 @@ class NewsParser:
             f"{config.GEMINI_MODEL}:generateContent"
         )
         payload = {
-            "contents": [{"parts": [{"text": NewsParser.REWRITE_PROMPT.format(
-                title=title, summary=summary or "(нет)")}]}],
+            "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.3,
-                "maxOutputTokens": 400,
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
                 "responseMimeType": "application/json",
             },
         }
@@ -201,12 +210,45 @@ class NewsParser:
                     headers={"x-goog-api-key": config.GEMINI_API_KEY},
                 ) as resp:
                     if resp.status != 200:
-                        logger.warning(f"Gemini ответил {resp.status}, используем перевод")
+                        logger.warning(f"Gemini ответил {resp.status}")
                         return None
                     data = await resp.json()
             text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            if text.startswith("```"):  # на случай, если модель обернула ответ в код-блок
+            if text.startswith("```"):  # модель иногда оборачивает ответ в код-блок
                 text = text.strip("`").removeprefix("json").strip()
+            return text
+        except Exception as e:
+            logger.warning(f"Запрос к Gemini не удался: {e}")
+            return None
+
+    @staticmethod
+    async def is_same_story(title_a: str, title_b: str) -> bool | None:
+        """Одна ли это новость? Лексика не отличает 'starts' от 'halts' — спрашиваем модель.
+        None — ИИ недоступен, решение принимает вызывающий по лексическому порогу."""
+        prompt = (
+            "Это заголовки двух новостей. Речь об одном и том же событии?\n"
+            "Разные события одной компании (например запуск и остановка производства, "
+            "снижение и повышение цен) — это РАЗНЫЕ новости.\n\n"
+            f"1: {title_a}\n2: {title_b}\n\n"
+            'Ответ строго в JSON: {"same": true} или {"same": false}'
+        )
+        text = await NewsParser._gemini_request(prompt, 50)
+        if text is None:
+            return None
+        try:
+            return bool(json.loads(text).get("same"))
+        except Exception:
+            return None
+
+    @staticmethod
+    async def rewrite_with_ai(title: str, summary: str) -> dict | None:
+        """Рерайт поста через Gemini. Возвращает {'title', 'summary'} по-русски
+        или None — тогда сработает обычная цепочка перевода."""
+        prompt = NewsParser.REWRITE_PROMPT.format(title=title, summary=summary or "(нет)")
+        text = await NewsParser._gemini_request(prompt, 400, temperature=0.3)
+        if text is None:
+            return None
+        try:
             result = json.loads(text)
             title_ru = (result.get("title") or "").strip()
             if not title_ru:
@@ -217,7 +259,7 @@ class NewsParser:
                 "summary": (result.get("summary") or "").strip()[:300],
             }
         except Exception as e:
-            logger.warning(f"Gemini-рерайт не удался ({e}), используем перевод")
+            logger.warning(f"Gemini-рерайт вернул неожиданный ответ ({e}), используем перевод")
             return None
 
     @staticmethod

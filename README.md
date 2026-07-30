@@ -14,7 +14,7 @@ Telegram bot that monitors EV industry news from RSS feeds (InsideEVs, Electrek,
 - **Translation fallback chain** — Google Translate → MyMemory → original English title. A translator outage never drops a post.
 - **Rich post cards** — cover image (RSS media tags with `og:image` fallback), translated summary, source attribution and hashtags; degrades gracefully to a text post if no image is available.
 - **Smart keyword filter** — case-insensitive word-boundary regex, so `ev` matches "EV sales" but not "every" or "level". Keywords are stored in the database and editable from Telegram at runtime — no restart needed.
-- **Two-level deduplication** — SQLite keyed by normalized article URL (tracking parameters stripped), plus cross-source story detection: when several feeds cover the same story, only the first one is published (title-similarity matching over the last 48h).
+- **Two-level deduplication** — SQLite keyed by normalized article URL (tracking parameters stripped), plus cross-source story detection: when several feeds cover the same story, only the first one is published. Lexical similarity picks candidates from the last 48h and the AI makes the call, because word overlap alone cannot tell "BYD starts production" from "BYD halts production"; without an API key it falls back to a conservative lexical threshold.
 - **Freshness guarantee** — articles older than `MAX_NEWS_AGE_HOURS` (default 24) are never published; the posting queue is priority-ordered so the newest story always goes out first, and each post shows the article's age.
 - **Rate-limited posting queue** — strict 60s interval between posts; if Telegram ever responds with a flood limit, the bot waits exactly as long as Telegram asks and retries.
 - **Quiet hours** — optional do-not-disturb window (e.g. `23-7` in the channel's timezone): news queue up overnight and publish in the morning.
@@ -56,6 +56,9 @@ All secrets are set via environment variables (`.env` is supported):
 | `GEMINI_MODEL` | no      | Gemini model for the rewrite (default `gemini-2.5-flash`) |
 | `MAX_POSTS_PER_DAY` | no | Daily post cap counted per `TIMEZONE` day; unset = unlimited |
 | `MAX_NEWS_AGE_HOURS` | no | Never publish articles older than this (default `24`; `0` = no limit) |
+| `QUEUE_GRACE_HOURS` | no | Extra hours granted to articles already waiting in the queue (default `12`) |
+| `SIMILARITY_CANDIDATE` | no | Title similarity above which a pair is sent to the AI duplicate check (default `0.3`) |
+| `SIMILARITY_THRESHOLD` | no | Lexical duplicate threshold, used only when the AI check is unavailable (default `0.7`) |
 
 Tuning lives in [config.py](config.py): posting interval (`POST_DELAY`), database name. RSS sources and the keyword filter are managed from Telegram at runtime; `RSS_URLS` in [config.py](config.py) and [keywords.json](keywords.json) only seed the initial lists on first run.
 
