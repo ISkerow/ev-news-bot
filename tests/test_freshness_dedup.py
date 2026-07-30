@@ -19,6 +19,29 @@ def test_unrelated_stories():
 def test_similarity_empty_input():
     assert NewsParser.title_similarity("", "Tesla news") == 0.0
 
+def test_stop_words_do_not_inflate_similarity():
+    """Служебные слова не должны создавать сходство между разными новостями."""
+    a = "The new Tesla factory will have more than you say"
+    b = "The new BYD sedan will have more than you say"
+    assert NewsParser.title_similarity(a, b) < 0.3
+
+def test_same_story_reaches_ai_candidate_threshold():
+    """Реальные формулировки одной истории должны попадать на проверку ИИ."""
+    pairs = [
+        ("Tesla Model Y Gets A Price Cut In China", "Tesla slashes Model Y prices in China again"),
+        ("Xiaomi SU7 sets new Nurburgring record", "Xiaomi SU7 Ultra breaks Nurburgring lap record"),
+        ("Nio reports record Q2 deliveries", "Nio deliveries hit record in second quarter"),
+    ]
+    for a, b in pairs:
+        assert NewsParser.title_similarity(a, b) >= config.SIMILARITY_CANDIDATE, (a, b)
+
+def test_opposite_verbs_are_lexically_similar():
+    """Лексика НЕ различает starts/halts — поэтому нужна ИИ-проверка кандидатов."""
+    score = NewsParser.title_similarity(
+        "BYD starts production at Brazil plant", "BYD halts production at Brazil plant"
+    )
+    assert score >= config.SIMILARITY_CANDIDATE  # уйдёт к ИИ, он и отсеет
+
 
 # --- Фильтр свежести ---
 

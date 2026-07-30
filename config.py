@@ -57,3 +57,25 @@ try:
     MAX_NEWS_AGE_HOURS = int(os.getenv("MAX_NEWS_AGE_HOURS", "24"))
 except ValueError:
     MAX_NEWS_AGE_HOURS = 24
+
+# Порог схожести заголовков для отсева дублей одной истории (0..1).
+# Работает, когда ИИ-проверка недоступна: ниже 0.6 начинает съедать разные
+# новости про один бренд ("starts" vs "halts").
+try:
+    SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.7"))
+except ValueError:
+    SIMILARITY_THRESHOLD = 0.7
+
+# С какой схожести пара считается кандидатом в дубли и уходит на проверку ИИ.
+# Ниже этого лексика уже уверенно говорит «разные новости» — API не дёргаем.
+try:
+    SIMILARITY_CANDIDATE = float(os.getenv("SIMILARITY_CANDIDATE", "0.3"))
+except ValueError:
+    SIMILARITY_CANDIDATE = 0.3
+
+# Запас для новостей, которые уже стоят в очереди: сколько лишних часов им прощаем,
+# чтобы они не протухали, пока ждут тихих часов или своей минуты в очереди.
+try:
+    QUEUE_GRACE_HOURS = int(os.getenv("QUEUE_GRACE_HOURS", "12"))
+except ValueError:
+    QUEUE_GRACE_HOURS = 12

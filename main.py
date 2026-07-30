@@ -74,13 +74,36 @@ class QueueManager:
         self.queue.put_nowait((-published.timestamp(), next(self._counter), item))
         return True
 
+    def _mark_skipped(self, url: str):
+        """Помним отброшенные URL, чтобы не тащить их из лент снова.
+        Множество не растим бесконечно — старые записи уже не встретятся в лентах."""
+        if len(self.skipped) >= 1000:
+            self.skipped.clear()
+        self.skipped.add(url)
+
     async def _is_duplicate_story(self, item: dict) -> bool:
-        """Та же история уже выходила с другого сайта? Сравниваем заголовки за 48 часов."""
+        """Та же история уже выходила с другого сайта? Сравниваем заголовки за 48 часов.
+        Лексика даёт кандидатов, финальное решение — за ИИ (если подключён):
+        'BYD starts production' и 'BYD halts production' по словам почти одинаковы."""
         since = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime('%Y-%m-%d %H:%M:%S')
         for title in await self.db.get_recent_titles(since):
-            if NewsParser.title_similarity(item['title_en'], title) >= 0.5:
-                self.skipped.add(item['url'])
-                logger.info(f"Пропуск дубля истории: «{item['title_en'][:60]}» ≈ «{title[:60]}»")
+            score = NewsParser.title_similarity(item['title_en'], title)
+            if score < config.SIMILARITY_CANDIDATE:
+                continue  # даже отдалённо не похоже — ИИ не тревожим
+
+            verdict = await NewsParser.is_same_story(item['title_en'], title)
+            if verdict is None:  # ИИ недоступен — решаем по лексическому порогу
+                verdict = score >= config.SIMILARITY_THRESHOLD
+                how = f"схожесть {score:.2f}"
+            else:
+                how = f"ИИ, схожесть {score:.2f}"
+
+            if verdict:
+                self._mark_skipped(item['url'])
+                logger.info(
+                    f"Пропуск дубля истории ({how}): "
+                    f"«{item['title_en'][:60]}» ≈ «{title[:60]}»"
+                )
                 return True
         return False
 
@@ -131,8 +154,12 @@ class QueueManager:
             attempted = False  # была ли реальная отправка (дубликаты не тормозят очередь)
             try:
                 # Пока новость ждала в очереди, она могла протухнуть
-                if NewsParser.is_too_old(item.get('published')):
-                    logger.info(f"Пропуск устаревшей новости: {item['title_en'][:70]}")
+                if NewsParser.is_too_old(item.get('published'), config.QUEUE_GRACE_HOURS):
+                    logger.warning(
+                        f"Пропуск устаревшей новости (ждала в очереди дольше "
+                        f"{config.MAX_NEWS_AGE_HOURS}+{config.QUEUE_GRACE_HOURS} ч): "
+                        f"{item['title_en'][:70]}"
+                    )
                 elif await self._is_duplicate_story(item):
                     pass  # лог внутри; URL добавлен в skipped
                 elif not await self.db.url_exists(item['url']):
