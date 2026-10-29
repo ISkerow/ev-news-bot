@@ -13,7 +13,7 @@ class FakeDB:
         self.known = set(known)
 
     async def init_db(self): pass
-    async def seed_keywords(self, words): pass
+    async def add_missing_keywords(self, words): return []
     async def seed_sources(self, urls): pass
     async def get_keywords(self): return ["byd"]
     async def get_sources(self): return ["https://feed"]
