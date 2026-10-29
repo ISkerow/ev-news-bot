@@ -13,8 +13,13 @@ MANAGER_URL = os.getenv("MANAGER_URL")  # Запасная ссылка под �
 # Пусто — кнопки WhatsApp не будет, бот возьмёт MANAGER_URL.
 WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE", "")
 
-# Надпись на кнопке
+# Надпись на кнопке WhatsApp
 BUTTON_TEXT = os.getenv("BUTTON_TEXT", "🚗 Подобрать электромобиль")
+
+# Вторая кнопка — Telegram. Ник менеджера или канала без «@» и без ссылки,
+# например ev_almaty_manager. Пусто — второй кнопки не будет.
+TELEGRAM_USERNAME = os.getenv("TELEGRAM_USERNAME", "")
+TELEGRAM_BUTTON_TEXT = os.getenv("TELEGRAM_BUTTON_TEXT", "✈️ Написать в Telegram")
 
 # Готовый текст заявки: клиент нажимает кнопку и отправляет это сообщение.
 # {title} подставит заголовок новости — менеджер сразу видит, какая машина интересует.

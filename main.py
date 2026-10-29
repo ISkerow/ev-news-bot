@@ -134,21 +134,25 @@ class QueueManager:
 
     @staticmethod
     def _build_keyboard(title_ru: str):
-        """Кнопка заявки под постом. Основной вариант — WhatsApp с готовым текстом,
-        запасной — MANAGER_URL. Если не настроено ни то, ни другое, пост уйдёт без кнопки."""
+        """Кнопки заявки под постом, в один ряд: WhatsApp и Telegram.
+        Оба текста заявки одинаковые, с подставленным заголовком новости.
+        Ничего не настроено — пробуем MANAGER_URL, иначе пост уйдёт без кнопок."""
+        message = quote(config.WHATSAPP_MESSAGE.replace("{title}", title_ru))
+        row = []
         if config.WHATSAPP_PHONE:
             # В номере оставляем только цифры: wa.me не принимает плюсы, пробелы и скобки
             phone = ''.join(c for c in config.WHATSAPP_PHONE if c.isdigit())
-            message = config.WHATSAPP_MESSAGE.replace("{title}", title_ru)
-            # quote: пробелы и кириллица должны уехать в ссылку в закодированном виде
-            url = f"https://wa.me/{phone}?text={quote(message)}"
-        elif config.MANAGER_URL:
-            url = config.MANAGER_URL
-        else:
-            return None
-        return InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text=config.BUTTON_TEXT, url=url)]]
-        )
+            row.append(InlineKeyboardButton(
+                text=config.BUTTON_TEXT, url=f"https://wa.me/{phone}?text={message}"
+            ))
+        if config.TELEGRAM_USERNAME:
+            nick = config.TELEGRAM_USERNAME.lstrip("@").strip()
+            row.append(InlineKeyboardButton(
+                text=config.TELEGRAM_BUTTON_TEXT, url=f"https://t.me/{nick}?text={message}"
+            ))
+        if not row and config.MANAGER_URL:
+            row.append(InlineKeyboardButton(text=config.BUTTON_TEXT, url=config.MANAGER_URL))
+        return InlineKeyboardMarkup(inline_keyboard=[row]) if row else None
 
     def _build_text(self, item: dict, title_ru: str, summary_ru: str, limit: int = None) -> str:
         """Собирает текст поста. limit — максимум символов (подпись к фото ограничена
