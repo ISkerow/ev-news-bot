@@ -57,6 +57,7 @@ KZ_BRANDS = [
     "Xiaomi",
     "Avatr",
     "Changan",
+    "Deepal",     # электромарка Changan
 ]
 
 # Источник, чьи новости уходят в канал первыми (имя из SOURCE_NAMES).

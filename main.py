@@ -436,8 +436,11 @@ async def prepare_db():
     # в файл внутри контейнера и дедупликация будет теряться при каждом деплое
     logger.info(f"База данных: {config.DB_NAME}")
     await db.init_db()
-    # Первый запуск: переносим стартовые слова и источники в базу
-    await db.seed_keywords(NewsParser.load_keywords())
+    # Переносим стартовые списки в базу: источники — только при первом запуске,
+    # ключевые слова — досеваем, чтобы пополнение keywords.json доезжало до базы
+    added = await db.add_missing_keywords(NewsParser.load_keywords())
+    if added:
+        logger.info(f"Добавлены ключевые слова из keywords.json: {', '.join(added)}")
     await db.seed_sources(config.RSS_URLS)
 
 

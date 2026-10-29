@@ -52,11 +52,19 @@ async def test_get_stats_respects_today_start(db):
 
 # --- Ключевые слова ---
 
-async def test_seed_keywords_once(db):
-    await db.seed_keywords(["ev", "Tesla ", "BYD"])
+async def test_keywords_seeded_into_empty_db(db):
+    added = await db.add_missing_keywords(["ev", "Tesla ", "BYD"])
+    assert sorted(added) == ["byd", "ev", "tesla"]
     assert await db.get_keywords() == ["byd", "ev", "tesla"]
-    await db.seed_keywords(["мусор"])  # повторный посев игнорируется
-    assert "мусор" not in await db.get_keywords()
+
+
+async def test_new_keywords_are_topped_up(db):
+    """Пополнили keywords.json — новые слова доезжают до уже заполненной базы."""
+    await db.add_missing_keywords(["ev", "byd"])
+    added = await db.add_missing_keywords(["ev", "byd", "PHEV", "DM-i"])
+    assert sorted(added) == ["dm-i", "phev"]            # добавились только новые
+    assert await db.get_keywords() == ["byd", "dm-i", "ev", "phev"]
+    assert await db.add_missing_keywords(["ev"]) == []  # повторный вызов ничего не делает
 
 async def test_add_and_remove_keyword(db):
     assert await db.add_keyword("Zeekr")

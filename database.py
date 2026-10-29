@@ -26,16 +26,19 @@ class Database:
 
     # --- Ключевые слова (живут в базе, чтобы переживать редеплой) ---
 
-    async def seed_keywords(self, words: list):
-        """Одноразовое заполнение: если таблица пуста, кладём стартовый список."""
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("SELECT COUNT(*) FROM keywords")
-            if (await cursor.fetchone())[0] == 0 and words:
+    async def add_missing_keywords(self, words: list) -> list:
+        """Досевает слова из стартового списка, которых ещё нет в базе.
+        Работает и на пустой базе, и при пополнении списка в keywords.json.
+        Возвращает то, что добавилось — чтобы записать в лог."""
+        existing = set(await self.get_keywords())
+        new = [w.lower().strip() for w in words if w.lower().strip() and w.lower().strip() not in existing]
+        if new:
+            async with aiosqlite.connect(self.db_path) as db:
                 await db.executemany(
-                    "INSERT OR IGNORE INTO keywords (word) VALUES (?)",
-                    [(w.lower().strip(),) for w in words]
+                    "INSERT OR IGNORE INTO keywords (word) VALUES (?)", [(w,) for w in new]
                 )
                 await db.commit()
+        return new
 
     async def get_keywords(self) -> list:
         async with aiosqlite.connect(self.db_path) as db:
