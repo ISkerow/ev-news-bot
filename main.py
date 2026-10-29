@@ -379,6 +379,9 @@ async def scheduled_parser():
         await asyncio.sleep(1800)
 
 async def main():
+    # Печатаем путь к базе: если переменные заданы неверно, база молча уедет
+    # в файл внутри контейнера и дедупликация будет теряться при каждом деплое
+    logger.info(f"База данных: {config.DB_NAME}")
     await db.init_db()
     # Первый запуск: переносим стартовые слова и источники в базу
     await db.seed_keywords(NewsParser.load_keywords())
