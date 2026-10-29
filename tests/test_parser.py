@@ -114,3 +114,7 @@ def test_summary_strips_continue_reading():
 
 def test_summary_strips_trailing_ellipsis_marker():
     assert NewsParser._clean_summary("Short teaser text […]") == "Short teaser text"
+
+
+def test_source_name_for_cnevpost():
+    assert NewsParser._source_name("https://cnevpost.com/feed/") == "CnEVPost"

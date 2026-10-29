@@ -40,11 +40,12 @@ CTA_TEXT = os.getenv(
 # а не ИИ: цены в новостях китайские, и путать их с ценой в Казахстане нельзя.
 PRICE_NOTE = os.getenv("PRICE_NOTE", "ℹ️ Цена указана для рынка Китая.")
 
-# Список RSS-источников (InsideEVs, Electrek, CarNewsChina)
+# Список RSS-источников (InsideEVs, Electrek, CarNewsChina, CnEVPost)
 RSS_URLS = [
     "https://insideevs.com/rss/articles/all/",
     "https://electrek.co/feed/",
-    "https://carnewschina.com/feed/"
+    "https://carnewschina.com/feed/",
+    "https://cnevpost.com/feed/",
 ]
 
 # Красивые имена источников для подписи в посте (домен -> имя)
@@ -52,6 +53,7 @@ SOURCE_NAMES = {
     "insideevs.com": "InsideEVs",
     "electrek.co": "Electrek",
     "carnewschina.com": "CarNewsChina",
+    "cnevpost.com": "CnEVPost",
 }
 
 # Марки, которые интересны рынку Казахстана. Новость публикуется, только если
