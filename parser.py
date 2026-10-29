@@ -201,6 +201,10 @@ class NewsParser:
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
                 "responseMimeType": "application/json",
+                # Без этого модель тратит лимит на внутренние размышления и
+                # обрывает ответ на полуслове (finishReason=MAX_TOKENS).
+                # Нам нужен короткий JSON, рассуждения не нужны.
+                "thinkingConfig": {"thinkingBudget": 0},
             },
         }
         try:
@@ -218,7 +222,8 @@ class NewsParser:
                 text = text.strip("`").removeprefix("json").strip()
             return text
         except Exception as e:
-            logger.warning(f"Запрос к Gemini не удался: {e}")
+            # У таймаута пустой текст ошибки — печатаем ещё и тип, иначе лог молчит
+            logger.warning(f"Запрос к Gemini не удался: {type(e).__name__} {e}")
             return None
 
     @staticmethod
