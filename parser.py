@@ -291,6 +291,34 @@ class NewsParser:
             logger.warning(f"Gemini вернул неожиданный ответ: {type(e).__name__} {e}")
             return None
 
+    # Что интересно человеку, который выбирает машину, а что — только отраслевым СМИ
+    INTEREST_PROMPT = (
+        "Ты редактор Telegram-канала автосалона, который продаёт электромобили "
+        "и гибриды. Интересна ли эта новость человеку, который выбирает себе машину?\n\n"
+        "ДА — если новость про: новую модель или её запуск, характеристики, "
+        "комплектации, запас хода, цены на автомобиль, тест-драйв, обзор, "
+        "сравнение моделей, обновление модели.\n"
+        "НЕТ — если новость про: финансы и отчётность компании, выручку, прибыль, "
+        "акции, численность сотрудников, строительство заводов, кадровые назначения, "
+        "политику, субсидии и законы, зарядную инфраструктуру в других странах, "
+        "отраслевую статистику.\n\n"
+        "Заголовок: {title}\n"
+        "Описание: {summary}\n\n"
+        'Ответ строго в JSON: {{"interesting": true}} или {{"interesting": false}}'
+    )
+
+    @staticmethod
+    async def is_interesting_for_buyer(title: str, summary: str = "") -> bool | None:
+        """Нужна ли новость покупателю машины. None — ИИ недоступен, решает вызывающий."""
+        prompt = NewsParser.INTEREST_PROMPT.format(title=title, summary=summary or "(нет)")
+        text = await NewsParser._gemini_request(prompt, 50)
+        if text is None:
+            return None
+        try:
+            return bool(json.loads(text).get("interesting"))
+        except Exception:
+            return None
+
     @staticmethod
     async def is_same_story(title_a: str, title_b: str) -> bool | None:
         """Одна ли это новость? Лексика не отличает 'starts' от 'halts' — спрашиваем модель.

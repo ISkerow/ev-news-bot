@@ -38,6 +38,8 @@ def demo_env(monkeypatch):
     monkeypatch.setattr(main, "DEMO_POST_DELAY", 0)
     monkeypatch.setattr(main.queue_manager, "_is_duplicate_story",
                         lambda item: _async_false())
+    monkeypatch.setattr(main.queue_manager, "_is_interesting",
+                        lambda item: _async_true())
     monkeypatch.setattr(main.queue_manager, "publish",
                         lambda item: _async_append(published, item))
     monkeypatch.setattr(main.bot, "session", _FakeSession())
@@ -45,6 +47,7 @@ def demo_env(monkeypatch):
 
 
 async def _async_false(): return False
+async def _async_true(): return True
 async def _async_append(store, item): store.append(item)
 
 
