@@ -94,6 +94,18 @@ class QueueManager:
             self.skipped.clear()
         self.skipped.add(url)
 
+    async def _is_interesting(self, item: dict) -> bool:
+        """Нужна ли новость покупателю машины. Если ИИ недоступен — публикуем:
+        лучше лишний пост, чем пустой канал."""
+        verdict = await NewsParser.is_interesting_for_buyer(
+            item['title_en'], item.get('summary_en', '')
+        )
+        if verdict is False:
+            self._mark_skipped(item['url'])
+            logger.info(f"Пропуск, не интересно покупателю: «{item['title_en'][:60]}»")
+            return False
+        return True
+
     async def _is_duplicate_story(self, item: dict) -> bool:
         """Та же история уже выходила с другого сайта? Сравниваем заголовки за 48 часов.
         Лексика даёт кандидатов, финальное решение — за ИИ (если подключён):
@@ -263,9 +275,13 @@ class QueueManager:
                         f"{config.MAX_NEWS_AGE_HOURS}+{config.QUEUE_GRACE_HOURS} ч): "
                         f"{item['title_en'][:70]}"
                     )
+                elif await self.db.url_exists(item['url']):
+                    pass  # уже публиковали — проверяем до обращений к ИИ, так дешевле
                 elif await self._is_duplicate_story(item):
                     pass  # лог внутри; URL добавлен в skipped
-                elif not await self.db.url_exists(item['url']):
+                elif not await self._is_interesting(item):
+                    pass  # лог внутри; URL добавлен в skipped
+                else:
                     attempted = True
                     await self.publish(item)
             except Exception as e:
@@ -461,6 +477,8 @@ async def run_demo(count: int):
             continue  # уже публиковали раньше
         if await queue_manager._is_duplicate_story(item):
             continue  # та же история с другого сайта
+        if not await queue_manager._is_interesting(item):
+            continue  # новость не про выбор машины
         try:
             await queue_manager.publish(item)
             published += 1
