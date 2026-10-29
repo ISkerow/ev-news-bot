@@ -100,6 +100,16 @@ class NewsParser:
         return bool(NewsParser._build_pattern(tuple(keywords)).search(title))
 
     @staticmethod
+    def has_target_brand(title: str, summary: str = "") -> bool:
+        """Есть ли в новости марка из списка KZ_BRANDS. Пустой список = фильтр выключен.
+        Смотрим и заголовок, и описание: в заголовке часто только модель («Denza N8»),
+        а марка упомянута в первой строке текста."""
+        if not config.KZ_BRANDS:
+            return True
+        pattern = NewsParser._build_pattern(tuple(config.KZ_BRANDS))
+        return bool(pattern.search(f"{title} {summary}"))
+
+    @staticmethod
     def _parse_published(entry):
         """Дата публикации записи в UTC или None, если лента её не отдаёт."""
         parsed = entry.get("published_parsed") or entry.get("updated_parsed")
@@ -376,6 +386,9 @@ class NewsParser:
                     # Некоторые ленты кладут в описание копию заголовка — не дублируем
                     if summary.rstrip(".…").lower() == entry.title.rstrip(".…").lower():
                         summary = ""
+                    # Фильтр марок: для автосалона нужны только машины, которые он продаёт
+                    if not NewsParser.has_target_brand(entry.title, summary):
+                        continue
                     source_items.append({
                         "title_en": entry.title,
                         "url": NewsParser._clean_url(entry.link),

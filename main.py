@@ -65,13 +65,16 @@ class QueueManager:
         self._limit_logged = False
 
     def put_news(self, item: dict) -> bool:
-        """Кладёт новость в очередь (свежие вперёд). False — уже там или отброшена."""
+        """Кладёт новость в очередь. Порядок: сначала приоритетный источник,
+        внутри — свежие вперёд. False — уже там или отброшена."""
         url = item['url']
         if url in self.pending or url in self.skipped:
             return False
         published = item.get('published') or datetime.now(timezone.utc)
+        # 0 — приоритетный источник, 1 — остальные: меньшее число берётся первым
+        rank = 0 if item.get('source') == config.PRIORITY_SOURCE else 1
         self.pending.add(url)
-        self.queue.put_nowait((-published.timestamp(), next(self._counter), item))
+        self.queue.put_nowait((rank, -published.timestamp(), next(self._counter), item))
         return True
 
     def _mark_skipped(self, url: str):
@@ -150,7 +153,7 @@ class QueueManager:
                     await asyncio.sleep(600)
                     continue
                 self._limit_logged = False
-            _, _, item = await self.queue.get()
+            _, _, _, item = await self.queue.get()
             attempted = False  # была ли реальная отправка (дубликаты не тормозят очередь)
             try:
                 # Пока новость ждала в очереди, она могла протухнуть

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+import config
 import main
 
 
@@ -7,10 +8,11 @@ def make_manager():
     return main.QueueManager(bot=None, db=None)
 
 
-def item(url, hours_ago=1):
+def item(url, hours_ago=1, source="Electrek"):
     return {
         "url": url,
         "title_en": f"Title {url}",
+        "source": source,
         "published": datetime.now(timezone.utc) - timedelta(hours=hours_ago),
     }
 
@@ -20,8 +22,18 @@ def test_queue_orders_newest_first():
     qm.put_news(item("https://a.com/old", hours_ago=10))
     qm.put_news(item("https://a.com/new", hours_ago=1))
     qm.put_news(item("https://a.com/mid", hours_ago=5))
-    order = [qm.queue.get_nowait()[2]["url"] for _ in range(3)]
+    order = [qm.queue.get_nowait()[3]["url"] for _ in range(3)]
     assert order == ["https://a.com/new", "https://a.com/mid", "https://a.com/old"]
+
+
+def test_priority_source_goes_first(monkeypatch):
+    """Новость приоритетного источника публикуется раньше, даже если она старее."""
+    monkeypatch.setattr(config, "PRIORITY_SOURCE", "CarNewsChina")
+    qm = make_manager()
+    qm.put_news(item("https://e.com/fresh", hours_ago=1, source="Electrek"))
+    qm.put_news(item("https://c.com/older", hours_ago=8, source="CarNewsChina"))
+    order = [qm.queue.get_nowait()[3]["url"] for _ in range(2)]
+    assert order == ["https://c.com/older", "https://e.com/fresh"]
 
 
 def test_queue_rejects_duplicates_and_skipped():
