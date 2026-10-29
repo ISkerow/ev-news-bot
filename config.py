@@ -29,6 +29,8 @@ KZ_BRANDS = [
     "Zeekr",
     "Li Auto", "LiXiang", "Li Xiang",
     "BYD",
+    "Denza",      # премиум-марка BYD
+    "Yangwang",   # флагманская марка BYD
     "Xiaomi",
     "Avatr",
     "Changan",
