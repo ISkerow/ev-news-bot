@@ -20,8 +20,22 @@ REQUEST_TIMEOUT = 30   # секунд на один запрос
 MAX_ATTEMPTS = 3       # попыток на каждый URL
 RETRY_BASE_DELAY = 2   # задержка растёт экспоненциально: 2, 4, 8 сек
 
+# Повторы запросов к Gemini: 429 — превышен лимит запросов в минуту,
+# 503 — модель временно перегружена. И то, и другое проходит само.
+GEMINI_ATTEMPTS = 3
+GEMINI_RETRY_DELAY = 5          # пауза растёт: 5, 10 сек
+RETRIABLE_STATUSES = {429, 503}
+
 # Трекинговые параметры, не влияющие на содержимое страницы
 TRACKING_PARAMS = {"fbclid", "gclid", "yclid", "igshid", "mc_cid", "mc_eid", "ref"}
+
+# Служебные хвосты, которые движки блогов дописывают в RSS-описание.
+# В пост они попадать не должны: это не текст новости, а подпись ленты.
+FEED_JUNK = [
+    re.compile(r"\s*The post\b.*$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\s*(Continue reading|Read more)\b.*$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\s*\[(…|\.\.\.)\]\s*$"),
+]
 
 # Служебные слова: в сравнении заголовков смысла не несут
 STOP_WORDS = {
@@ -155,8 +169,11 @@ class NewsParser:
 
     @staticmethod
     def _clean_summary(html: str, limit: int = 200) -> str:
-        """Убирает HTML-теги из описания и обрезает до limit символов по слову."""
+        """Убирает HTML-теги и служебные хвосты лент, обрезает до limit символов по слову."""
         text = BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True)
+        for junk in FEED_JUNK:
+            text = junk.sub("", text)
+        text = text.strip()
         if len(text) <= limit:
             return text
         return text[:limit].rsplit(" ", 1)[0] + "…"
@@ -203,7 +220,8 @@ class NewsParser:
 
     @staticmethod
     async def _gemini_request(prompt: str, max_tokens: int, temperature: float = 0.1) -> str | None:
-        """Один запрос к Gemini. Возвращает текст ответа или None при любой проблеме."""
+        """Запрос к Gemini с повтором. 429 (превышен лимит запросов) и 503 (модель
+        перегружена) — временные: ждём и пробуем снова. Возвращает текст или None."""
         if not config.GEMINI_API_KEY:
             return None
         url = (
@@ -222,23 +240,55 @@ class NewsParser:
                 "thinkingConfig": {"thinkingBudget": 0},
             },
         }
+        data = None
+        for attempt in range(1, GEMINI_ATTEMPTS + 1):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url, json=payload, ssl=SSL_CONTEXT, timeout=30,
+                        headers={"x-goog-api-key": config.GEMINI_API_KEY},
+                    ) as resp:
+                        if resp.status == 429 and "per day" in (await resp.text()).lower():
+                            # Дневная квота: ждать бессмысленно, она вернётся только завтра
+                            logger.warning(
+                                "Gemini: исчерпан дневной лимит бесплатного тарифа — "
+                                "до завтра посты идут через обычный перевод"
+                            )
+                            return None
+                        if resp.status in RETRIABLE_STATUSES and attempt < GEMINI_ATTEMPTS:
+                            delay = GEMINI_RETRY_DELAY * attempt  # 5, 10 сек
+                            reason = "лимит запросов" if resp.status == 429 else "модель занята"
+                            logger.warning(
+                                f"Gemini: {reason} ({resp.status}), повтор через {delay} сек "
+                                f"({attempt}/{GEMINI_ATTEMPTS})"
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        if resp.status != 200:
+                            logger.warning(f"Gemini ответил {resp.status}")
+                            return None
+                        data = await resp.json()
+                        break
+            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                # У таймаута пустой текст ошибки — печатаем тип, иначе лог молчит
+                if attempt < GEMINI_ATTEMPTS:
+                    logger.warning(
+                        f"Gemini недоступен ({type(e).__name__}), "
+                        f"повтор ({attempt}/{GEMINI_ATTEMPTS})"
+                    )
+                    await asyncio.sleep(GEMINI_RETRY_DELAY)
+                    continue
+                logger.warning(f"Gemini недоступен ({type(e).__name__}), используем перевод")
+                return None
+        if data is None:
+            return None
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url, json=payload, ssl=SSL_CONTEXT, timeout=30,
-                    headers={"x-goog-api-key": config.GEMINI_API_KEY},
-                ) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"Gemini ответил {resp.status}")
-                        return None
-                    data = await resp.json()
             text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
             if text.startswith("```"):  # модель иногда оборачивает ответ в код-блок
                 text = text.strip("`").removeprefix("json").strip()
             return text
         except Exception as e:
-            # У таймаута пустой текст ошибки — печатаем ещё и тип, иначе лог молчит
-            logger.warning(f"Запрос к Gemini не удался: {type(e).__name__} {e}")
+            logger.warning(f"Gemini вернул неожиданный ответ: {type(e).__name__} {e}")
             return None
 
     @staticmethod
