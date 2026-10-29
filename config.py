@@ -6,7 +6,23 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
-MANAGER_URL = os.getenv("MANAGER_URL")  # Ссылка под постом; если не задана — пост без кнопки
+MANAGER_URL = os.getenv("MANAGER_URL")  # Запасная ссылка под постом, если WhatsApp не настроен
+
+# --- Кнопка заявки под постом (WhatsApp) ---
+# Номер автосалона: только цифры, без плюса, пробелов и скобок. Пример: 77011234567.
+# Пусто — кнопки WhatsApp не будет, бот возьмёт MANAGER_URL.
+WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE", "")
+
+# Надпись на кнопке
+BUTTON_TEXT = os.getenv("BUTTON_TEXT", "🚗 Узнать цену / Тест-драйв")
+
+# Готовый текст заявки: клиент нажимает кнопку и отправляет это сообщение.
+# {title} подставит заголовок новости — менеджер сразу видит, какая машина интересует.
+WHATSAPP_MESSAGE = os.getenv(
+    "WHATSAPP_MESSAGE",
+    "Здравствуйте! Увидел новость: «{title}». "
+    "Подскажите цену и наличие, хочу записаться на тест-драйв.",
+)
 
 # Список RSS-источников (InsideEVs, Electrek, CarNewsChina)
 RSS_URLS = [

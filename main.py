@@ -4,6 +4,7 @@ import itertools
 import logging
 import sys
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types, Router
 from aiogram.client.default import DefaultBotProperties
@@ -114,6 +115,24 @@ class QueueManager:
                 return True
         return False
 
+    @staticmethod
+    def _build_keyboard(title_ru: str):
+        """Кнопка заявки под постом. Основной вариант — WhatsApp с готовым текстом,
+        запасной — MANAGER_URL. Если не настроено ни то, ни другое, пост уйдёт без кнопки."""
+        if config.WHATSAPP_PHONE:
+            # В номере оставляем только цифры: wa.me не принимает плюсы, пробелы и скобки
+            phone = ''.join(c for c in config.WHATSAPP_PHONE if c.isdigit())
+            message = config.WHATSAPP_MESSAGE.replace("{title}", title_ru)
+            # quote: пробелы и кириллица должны уехать в ссылку в закодированном виде
+            url = f"https://wa.me/{phone}?text={quote(message)}"
+        elif config.MANAGER_URL:
+            url = config.MANAGER_URL
+        else:
+            return None
+        return InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text=config.BUTTON_TEXT, url=url)]]
+        )
+
     def _build_text(self, item: dict, title_ru: str, summary_ru: str, limit: int = None) -> str:
         """Собирает текст поста. limit — максимум символов (подпись к фото ограничена
         1024). Если не влезаем, сокращаем описание: заголовок и ссылку режем в последнюю
@@ -221,12 +240,7 @@ class QueueManager:
                         if item.get('summary_en'):
                             summary_ru = await asyncio.to_thread(NewsParser.translate_title, item['summary_en'])
 
-                    # Кнопка лидогенерации; без MANAGER_URL пост уходит без кнопки
-                    kb = None
-                    if config.MANAGER_URL:
-                        kb = InlineKeyboardMarkup(inline_keyboard=[
-                            [InlineKeyboardButton(text="🚗 Консультация менеджера", url=config.MANAGER_URL)]
-                        ])
+                    kb = self._build_keyboard(title_ru)
 
                     # С фото действует лимит подписи Telegram, без фото — лимит сообщения
                     text = self._build_text(
