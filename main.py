@@ -28,6 +28,10 @@ except Exception:
     TZ = ZoneInfo("UTC")
 
 
+# Telegram разрешает не больше 1024 символов в подписи к фото
+CAPTION_LIMIT = 1024
+
+
 def today_start_utc() -> str:
     """Начало сегодняшнего дня в TIMEZONE, переведённое в UTC (формат как в базе)."""
     day_start = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -110,16 +114,48 @@ class QueueManager:
                 return True
         return False
 
+    def _build_text(self, item: dict, title_ru: str, summary_ru: str, limit: int = None) -> str:
+        """Собирает текст поста. limit — максимум символов (подпись к фото ограничена
+        1024). Если не влезаем, сокращаем описание: заголовок и ссылку режем в последнюю
+        очередь, они важнее."""
+        source = item.get('source', '')
+        footer_parts = []
+        if source:
+            footer_parts.append(f"📰 {source}")
+        if item.get('published'):
+            mins = int((datetime.now(timezone.utc) - item['published']).total_seconds() // 60)
+            footer_parts.append(f"{mins} мин назад" if mins < 60 else f"{mins // 60} ч назад")
+        footer_parts.append(f"<a href='{item['url']}'>Читать оригинал</a>")
+        source_tag = ''.join(c for c in source if c.isalnum())
+
+        # Экранируем < > & — иначе Telegram отклонит HTML-разметку
+        def assemble(summary: str) -> str:
+            parts = [f"<b>{html.escape(title_ru, quote=False)}</b>"]
+            if summary:
+                parts.append(html.escape(summary, quote=False))
+            parts.append(" · ".join(footer_parts))
+            parts.append("#EV #AutoNews" + (f" #{source_tag}" if source_tag else ""))
+            return "\n\n".join(parts)
+
+        text = assemble(summary_ru)
+        if limit and len(text) > limit and summary_ru:
+            keep = len(summary_ru) - (len(text) - limit) - 1
+            shortened = summary_ru[:keep].rsplit(" ", 1)[0] + "…" if keep > 40 else ""
+            text = assemble(shortened)
+        return text
+
     async def _send_post(self, item: dict, text: str, kb):
         """С обложкой — фото-пост, иначе текстовый. Флуд-лимит пробрасываем наверх."""
         if item.get('image'):
             try:
-                return await self.bot.send_photo(
+                msg = await self.bot.send_photo(
                     chat_id=config.CHANNEL_ID,
                     photo=item['image'],
                     caption=text,
                     reply_markup=kb
                 )
+                logger.info("Пост опубликован с фото")
+                return msg
             except TelegramRetryAfter:
                 raise
             except Exception as e:
@@ -192,22 +228,11 @@ class QueueManager:
                             [InlineKeyboardButton(text="🚗 Консультация менеджера", url=config.MANAGER_URL)]
                         ])
 
-                    # Экранируем < > & — иначе Telegram отклонит HTML-разметку
-                    source = item.get('source', '')
-                    parts = [f"<b>{html.escape(title_ru, quote=False)}</b>"]
-                    if summary_ru:
-                        parts.append(html.escape(summary_ru, quote=False))
-                    footer_parts = []
-                    if source:
-                        footer_parts.append(f"📰 {source}")
-                    if item.get('published'):
-                        mins = int((datetime.now(timezone.utc) - item['published']).total_seconds() // 60)
-                        footer_parts.append(f"{mins} мин назад" if mins < 60 else f"{mins // 60} ч назад")
-                    footer_parts.append(f"<a href='{item['url']}'>Читать оригинал</a>")
-                    parts.append(" · ".join(footer_parts))
-                    source_tag = ''.join(c for c in source if c.isalnum())
-                    parts.append("#EV #AutoNews" + (f" #{source_tag}" if source_tag else ""))
-                    text = "\n\n".join(parts)
+                    # С фото действует лимит подписи Telegram, без фото — лимит сообщения
+                    text = self._build_text(
+                        item, title_ru, summary_ru,
+                        limit=CAPTION_LIMIT if item.get('image') else None,
+                    )
 
                     # Флуд-лимит: Telegram сам называет паузу — ждём и повторяем один раз
                     try:
