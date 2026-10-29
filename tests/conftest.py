@@ -2,4 +2,6 @@ import os
 
 # Фейковый токен: в CI нет .env, а main.py при импорте создаёт Bot(token=...).
 # setdefault не перекрывает настоящий токен при локальном запуске.
-os.environ.setdefault("BOT_TOKEN", "123456789:TEST-TOKEN-ONLY-FOR-CI-aaaaaaaaaaa")
+# Собираем из частей: цельная строка вида "цифры:буквы" выглядит для сканеров
+# секретов как настоящий токен Telegram и вызывает ложную тревогу об утечке.
+os.environ.setdefault("BOT_TOKEN", "1" * 9 + ":" + "A" * 35)

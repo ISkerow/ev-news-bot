@@ -22,8 +22,26 @@ SOURCE_NAMES = {
     "carnewschina.com": "CarNewsChina",
 }
 
+def _db_path() -> str:
+    """Путь к файлу базы. Основное имя — DB_PATH, DATABASE_URL принимаем как
+    запасное: так эту переменную назвали на хостинге. Понимаем и обычный путь,
+    и запись вида sqlite:///news.db. Адрес чужой СУБД (postgres://...) пропускаем —
+    у нас SQLite-файл, и работать с таким адресом бот всё равно не умеет."""
+    for name in ("DB_PATH", "DATABASE_URL"):
+        value = os.getenv(name, "").strip()
+        if not value:
+            continue
+        if "://" not in value:
+            return value  # обычный путь к файлу
+        scheme, _, rest = value.partition("://")
+        if scheme.split("+")[0] == "sqlite":
+            # sqlite:///news.db -> news.db, sqlite:////data/news.db -> /data/news.db
+            return rest[1:] if rest.startswith("//") else rest.lstrip("/")
+    return "news_production.db"
+
+
 # Путь к базе; на хостинге с volume задаётся через env (например /data/news_production.db)
-DB_NAME = os.getenv("DB_PATH", "news_production.db")
+DB_NAME = _db_path()
 POST_DELAY = 60
 
 
@@ -44,7 +62,7 @@ TIMEZONE = os.getenv("TIMEZONE", "UTC")  # IANA-имя, например Asia/Al
 
 # ИИ-рерайт постов: ключ задан — включён, не задан — обычный перевод
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 # Дневной лимит постов (по дню в TIMEZONE); 0 или не задано — без лимита
 try:
