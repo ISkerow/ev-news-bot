@@ -154,6 +154,9 @@ class QueueManager:
                 parts.append(html.escape(summary, quote=False))
             parts.append(" · ".join(footer_parts))
             parts.append("#EV #AutoNews" + (f" #{source_tag}" if source_tag else ""))
+            # Призыв идёт последним — прямо над кнопкой заявки
+            if config.CTA_TEXT:
+                parts.append(html.escape(config.CTA_TEXT, quote=False))
             return "\n\n".join(parts)
 
         text = assemble(summary_ru)
