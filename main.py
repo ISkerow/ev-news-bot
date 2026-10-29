@@ -3,6 +3,7 @@ import asyncio
 import html
 import itertools
 import logging
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -36,6 +37,19 @@ CAPTION_LIMIT = 1024
 # Пауза между постами в демо-режиме: Telegram принимает примерно 20 сообщений
 # в минуту на канал, 5 секунд дают запас и при этом показ идёт быстро
 DEMO_POST_DELAY = 5
+
+# Цена в тексте: число рядом с юанями или долларами (в любом порядке).
+# Нужна именно цена, поэтому одного слова «доллар» без суммы мало.
+PRICE_PATTERN = re.compile(
+    r"\d[\d\s .,]*\s*(юан|юань|доллар|usd|cny|¥|\$)"
+    r"|[¥$]\s*\d",
+    re.IGNORECASE,
+)
+
+
+def mentions_price(*texts: str) -> bool:
+    """Есть ли в тексте цена в юанях или долларах."""
+    return any(PRICE_PATTERN.search(t or "") for t in texts)
 
 
 def today_start_utc() -> str:
@@ -173,6 +187,9 @@ class QueueManager:
             parts = [f"<b>{html.escape(title_ru, quote=False)}</b>"]
             if summary:
                 parts.append(html.escape(summary, quote=False))
+            # Цены в новостях китайские — помечаем, чтобы их не приняли за местные
+            if config.PRICE_NOTE and mentions_price(title_ru, summary):
+                parts.append(html.escape(config.PRICE_NOTE, quote=False))
             parts.append(" · ".join(footer_parts))
             parts.append("#EV #AutoNews" + (f" #{source_tag}" if source_tag else ""))
             # Призыв идёт последним — прямо над кнопкой заявки
