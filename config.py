@@ -103,7 +103,7 @@ TIMEZONE = os.getenv("TIMEZONE", "UTC")  # IANA-имя, например Asia/Al
 
 # ИИ-рерайт постов: ключ задан — включён, не задан — обычный перевод
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 # Дневной лимит постов (по дню в TIMEZONE); 0 или не задано — без лимита
 try:
