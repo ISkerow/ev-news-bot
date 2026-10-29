@@ -96,3 +96,21 @@ def test_source_name_strips_www():
 
 def test_source_name_unknown_domain_falls_back():
     assert NewsParser._source_name("https://cleantechnica.com/feed/") == "cleantechnica.com"
+
+
+# --- Служебные хвосты лент ---
+
+def test_summary_strips_wordpress_tail():
+    """«The post ... appeared first on ...» — подпись движка, не текст новости."""
+    raw = ("<p>The EV microcar is one step closer to production.</p>"
+           "<p>The post Chery K-car exposed appeared first on CarNewsChina.</p>")
+    assert NewsParser._clean_summary(raw) == "The EV microcar is one step closer to production."
+
+
+def test_summary_strips_continue_reading():
+    raw = "Deliveries begin next month. Continue reading Li Auto i6 launch at Electrek."
+    assert NewsParser._clean_summary(raw) == "Deliveries begin next month."
+
+
+def test_summary_strips_trailing_ellipsis_marker():
+    assert NewsParser._clean_summary("Short teaser text […]") == "Short teaser text"

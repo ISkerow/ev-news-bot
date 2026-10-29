@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import html
 import itertools
@@ -31,6 +32,10 @@ except Exception:
 
 # Telegram разрешает не больше 1024 символов в подписи к фото
 CAPTION_LIMIT = 1024
+
+# Пауза между постами в демо-режиме: Telegram принимает примерно 20 сообщений
+# в минуту на канал, 5 секунд дают запас и при этом показ идёт быстро
+DEMO_POST_DELAY = 5
 
 
 def today_start_utc() -> str:
@@ -189,6 +194,43 @@ class QueueManager:
             disable_web_page_preview=False
         )
 
+    async def publish(self, item: dict):
+        """Готовит и публикует одну новость: картинка, текст, кнопка, отправка, запись в базу.
+        Используется и обычным расписанием, и демо-режимом."""
+        # Если в RSS не было картинки — пробуем взять og:image со страницы статьи
+        if not item.get('image'):
+            item['image'] = await NewsParser.fetch_og_image(item['url'])
+
+        # Цепочка: ИИ-рерайт (если настроен) → обычный перевод
+        rewritten = await NewsParser.rewrite_with_ai(item['title_en'], item.get('summary_en', ''))
+        if rewritten:
+            title_ru = rewritten['title']
+            summary_ru = rewritten['summary']
+        else:
+            # Переводчик синхронный (requests) — уводим в поток, чтобы не морозить event loop
+            title_ru = await asyncio.to_thread(NewsParser.translate_title, item['title_en'])
+            summary_ru = ""
+            if item.get('summary_en'):
+                summary_ru = await asyncio.to_thread(NewsParser.translate_title, item['summary_en'])
+
+        kb = self._build_keyboard(title_ru)
+        # С фото действует лимит подписи Telegram, без фото — лимит сообщения
+        text = self._build_text(
+            item, title_ru, summary_ru,
+            limit=CAPTION_LIMIT if item.get('image') else None,
+        )
+
+        # Флуд-лимит: Telegram сам называет паузу — ждём и повторяем один раз
+        try:
+            msg = await self._send_post(item, text, kb)
+        except TelegramRetryAfter as e:
+            logger.warning(f"Флуд-лимит Telegram: ждём {e.retry_after} сек и повторяем")
+            await asyncio.sleep(e.retry_after + 1)
+            msg = await self._send_post(item, text, kb)
+
+        await self.db.add_news(item['url'], title_ru, msg.message_id, item['title_en'])
+        logger.info(f"✅ Опубликовано: {title_ru}")
+
     async def worker(self):
         """Разгребает очередь по одной новости с жестким интервалом."""
         while True:
@@ -225,42 +267,7 @@ class QueueManager:
                     pass  # лог внутри; URL добавлен в skipped
                 elif not await self.db.url_exists(item['url']):
                     attempted = True
-                    # Если в RSS не было картинки — пробуем взять og:image со страницы статьи
-                    if not item.get('image'):
-                        item['image'] = await NewsParser.fetch_og_image(item['url'])
-
-                    # Цепочка: ИИ-рерайт (если настроен) → обычный перевод
-                    rewritten = await NewsParser.rewrite_with_ai(
-                        item['title_en'], item.get('summary_en', '')
-                    )
-                    if rewritten:
-                        title_ru = rewritten['title']
-                        summary_ru = rewritten['summary']
-                    else:
-                        # Переводчик синхронный (requests) — уводим в поток, чтобы не морозить event loop
-                        title_ru = await asyncio.to_thread(NewsParser.translate_title, item['title_en'])
-                        summary_ru = ""
-                        if item.get('summary_en'):
-                            summary_ru = await asyncio.to_thread(NewsParser.translate_title, item['summary_en'])
-
-                    kb = self._build_keyboard(title_ru)
-
-                    # С фото действует лимит подписи Telegram, без фото — лимит сообщения
-                    text = self._build_text(
-                        item, title_ru, summary_ru,
-                        limit=CAPTION_LIMIT if item.get('image') else None,
-                    )
-
-                    # Флуд-лимит: Telegram сам называет паузу — ждём и повторяем один раз
-                    try:
-                        msg = await self._send_post(item, text, kb)
-                    except TelegramRetryAfter as e:
-                        logger.warning(f"Флуд-лимит Telegram: ждём {e.retry_after} сек и повторяем")
-                        await asyncio.sleep(e.retry_after + 1)
-                        msg = await self._send_post(item, text, kb)
-
-                    await self.db.add_news(item['url'], title_ru, msg.message_id, item['title_en'])
-                    logger.info(f"✅ Опубликовано: {title_ru}")
+                    await self.publish(item)
             except Exception as e:
                 logger.error(f"Ошибка публикации: {e}")
             finally:
@@ -423,7 +430,8 @@ async def scheduled_parser():
         logger.info(f"✅ Найдено новых целевых новостей: {added}")
         await asyncio.sleep(1800)
 
-async def main():
+async def prepare_db():
+    """Готовит базу: таблицы и стартовые списки слов и источников."""
     # Печатаем путь к базе: если переменные заданы неверно, база молча уедет
     # в файл внутри контейнера и дедупликация будет теряться при каждом деплое
     logger.info(f"База данных: {config.DB_NAME}")
@@ -431,6 +439,46 @@ async def main():
     # Первый запуск: переносим стартовые слова и источники в базу
     await db.seed_keywords(NewsParser.load_keywords())
     await db.seed_sources(config.RSS_URLS)
+
+
+async def run_demo(count: int):
+    """Демо-режим: публикует несколько свежих новостей подряд и завершается.
+    Расписание, тихие часы и дневной лимит не действуют — это ручной показ."""
+    await prepare_db()
+    logger.info(f"🎬 Демо-режим: публикуем {count} свежих новостей в канал {config.CHANNEL_ID}")
+    keywords = await db.get_keywords()
+    sources = await db.get_sources()
+    news = await NewsParser.fetch_rss(keywords, sources)
+
+    published = 0
+    for item in news:
+        if published >= count:
+            break
+        if await db.url_exists(item['url']):
+            continue  # уже публиковали раньше
+        if await queue_manager._is_duplicate_story(item):
+            continue  # та же история с другого сайта
+        try:
+            await queue_manager.publish(item)
+            published += 1
+        except Exception as e:
+            logger.error(f"Не удалось опубликовать «{item['title_en'][:60]}»: {e}")
+            continue
+        if published < count:
+            # Короткая пауза между постами, чтобы не словить флуд-лимит Telegram
+            await asyncio.sleep(DEMO_POST_DELAY)
+
+    if published < count:
+        logger.warning(
+            f"Свежих подходящих новостей хватило только на {published} из {count}. "
+            "Попробуйте позже или расширьте список марок в config.KZ_BRANDS."
+        )
+    logger.info(f"🎬 Демо завершено: опубликовано {published} постов")
+    await bot.session.close()
+
+
+async def main():
+    await prepare_db()
     dp.include_router(router)
     
     asyncio.create_task(queue_manager.worker())
@@ -441,9 +489,15 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="EV News Bot")
+    parser.add_argument(
+        "--demo", nargs="?", type=int, const=3, metavar="N",
+        help="опубликовать N свежих новостей сразу и выйти (по умолчанию 3)",
+    )
+    args = parser.parse_args()
     try:
         if sys.platform == "win32":
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        asyncio.run(main())
+        asyncio.run(run_demo(args.demo) if args.demo else main())
     except KeyboardInterrupt:
         logger.info("Бот остановлен.")
