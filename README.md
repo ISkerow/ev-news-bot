@@ -5,28 +5,91 @@
 ![aiogram](https://img.shields.io/badge/aiogram-3.x-2CA5E0)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-Telegram bot that monitors EV industry news from RSS feeds (InsideEVs, Electrek, CarNewsChina), filters them by keywords, translates titles to Russian, and auto-posts to a Telegram channel — fully unattended.
+Telegram bot for a car dealership channel. It watches EV and hybrid news from RSS feeds, keeps only the stories about the brands the dealership actually sells, rewrites them into natural Russian with an LLM, and posts them with a photo and an enquiry button — fully unattended.
 
-## Features
+Built for the Kazakhstan market (Chinese EV brands), but every filter is configuration, not code.
 
-- **Resilient fetching** — 3 retries per feed with exponential backoff, 30s timeout, separate handling for timeouts, network errors, and malformed XML. One dead source never blocks the others.
-- **AI content rewrite (optional)** — with a `GEMINI_API_KEY` set, titles and summaries are rewritten into natural Russian news style by Gemini, with a strict no-invention prompt (facts from the source text only). Without the key — or if the API fails — the bot falls back to plain translation.
-- **Translation fallback chain** — Google Translate → MyMemory → original English title. A translator outage never drops a post.
-- **Rich post cards** — cover image (RSS media tags with `og:image` fallback), translated summary, source attribution and hashtags; degrades gracefully to a text post if no image is available.
-- **Smart keyword filter** — case-insensitive word-boundary regex, so `ev` matches "EV sales" but not "every" or "level". Keywords are stored in the database and editable from Telegram at runtime — no restart needed.
-- **Two-level deduplication** — SQLite keyed by normalized article URL (tracking parameters stripped), plus cross-source story detection: when several feeds cover the same story, only the first one is published. Lexical similarity picks candidates from the last 48h and the AI makes the call, because word overlap alone cannot tell "BYD starts production" from "BYD halts production"; without an API key it falls back to a conservative lexical threshold.
-- **Freshness guarantee** — articles older than `MAX_NEWS_AGE_HOURS` (default 24) are never published; the posting queue is priority-ordered so the newest story always goes out first, and each post shows the article's age.
-- **Rate-limited posting queue** — strict 60s interval between posts; if Telegram ever responds with a flood limit, the bot waits exactly as long as Telegram asks and retries.
-- **Quiet hours** — optional do-not-disturb window (e.g. `23-7` in the channel's timezone): news queue up overnight and publish in the morning.
-- **Lead generation** — configurable inline button under every post (link to a manager / order page).
-- **Admin tools** — a control panel right in Telegram: `/stats` (posts, queue, filter status), `/keywords`, `/add_kw`, `/del_kw` (manage the filter live), `/sources`, `/add_source`, `/del_source` (manage RSS feeds live — a new feed is validated before it is saved), `/pause` / `/resume` (hold publishing without stopping the bot), `/delete_last` (remove the latest post from the channel and the database).
+## What a post looks like
+
+```
+🖼  [cover photo from the article]
+
+Li Auto выпустила обновленный Li i6 2026 года в Китае
+
+28 октября 2026 года Li Auto представила модель Li i6 2026 года с обновленным
+оборудованием. Стоимость новинки составляет 249 800 юаней (37 300 долларов),
+а по специальной временной цене автомобиль доступен от 239 800 юаней.
+
+ℹ️ Цена указана для рынка Китая.
+
+📰 CarNewsChina · 22 ч назад · Читать оригинал
+
+#EV #AutoNews #CarNewsChina
+
+Интересуют электромобили? Напишите нам — подберём модель под ваш бюджет.
+
+[ 🚗 Подобрать электромобиль ]  [ ✈️ Написать в Telegram ]
+```
+
+Both buttons open a chat with the dealership and pre-fill the enquiry text, with the headline of that post inserted — the manager instantly sees which car the customer is asking about.
 
 ## How it works
 
 ```
-RSS feeds ──> keyword filter ──> dedup check ──> queue ──> translate ──> post to channel
-   (every 30 min)                  (SQLite)         (1 post / 60 s)
+4 RSS feeds ──> keyword filter ──> brand filter ──> freshness check ──> priority queue
+ (every 30 min)   (database)        (KZ_BRANDS)      (max 24h old)      (newest first)
+                                                                              │
+     channel <── photo + button <── CTA + price note <── AI rewrite <── AI checks:
+                                      (from config)      (Gemini)       duplicate? relevant?
 ```
+
+Every AI step degrades gracefully: no API key or a failing API never drops a post, it just falls back to plain translation and lexical duplicate matching.
+
+## Features
+
+### Content selection
+
+- **Brand filter** — a story is published only if one of `KZ_BRANDS` (Zeekr, Li Auto/LiXiang, BYD, Denza, Yangwang, Xiaomi, Avatr, Changan, Deepal) appears in its title or summary. Word-boundary matching, so `Avatr` never matches "avatar". An empty list disables the filter.
+- **Hybrid coverage** — PHEV, EREV, REEV, DM-i, DM-p and plug-in hybrid are first-class keywords, not just battery EVs.
+- **AI relevance check** — before publishing, the model is asked whether the story matters to someone *choosing a car*. Model launches, specs, prices, range, reviews and test drives pass; company financials, headcount, factory construction, politics, subsidies and foreign charging infrastructure are skipped.
+- **Two-level deduplication** — SQLite keyed by normalized article URL (tracking parameters stripped), plus cross-source story detection: lexical similarity picks candidates from the last 48h and the AI decides, because word overlap alone cannot tell "BYD starts production" from "BYD halts production". Without an API key it falls back to a conservative lexical threshold.
+- **Freshness guarantee** — articles older than `MAX_NEWS_AGE_HOURS` (default 24) are never published, checked again at send time in case a story waited out the window in the queue. Each post shows the article's age.
+- **Priority source** — `PRIORITY_SOURCE` outranks freshness, so the feed that covers these brands best goes out first.
+
+### Writing
+
+- **AI rewrite** — with `GEMINI_API_KEY` set, Gemini rewrites the headline and summary into natural Russian news style. The prompt forbids inventing anything beyond the source text, and explicitly forbids claims about local availability, pricing, delivery or credit — those belong to the dealership, not to a model. Thinking tokens are disabled, which keeps replies complete and cheap.
+- **Translation fallback chain** — Google Translate → MyMemory → the original English headline. A translator outage never drops a post.
+- **Fixed call to action** — `CTA_TEXT` is appended by code as the last line, above the buttons. The AI never sees it and cannot reword it.
+- **Chinese price note** — when a post mentions an amount in yuan or dollars, `PRICE_NOTE` is appended right after the summary, so a Chinese price is never mistaken for a local one. Detection requires a number next to the currency.
+- **Feed junk removal** — "The post … appeared first on …" and similar blog-engine tails are stripped before translation.
+
+### Delivery
+
+- **Photos** — cover image from RSS media tags, with an `og:image` fallback that fetches it from the article page (some feeds ship no images at all). No image, or a photo Telegram refuses — the post goes out as text instead of failing.
+- **Caption limit** — Telegram allows 1024 characters on a photo caption; when a post would overflow, the summary is shortened on a word boundary while the headline, link and call to action stay intact.
+- **Enquiry buttons** — WhatsApp (`wa.me`) and Telegram (`t.me`) side by side, both carrying the same ready-to-send message with `{title}` substituted. Configure either, both, or neither.
+- **Rate limiting** — strict interval between posts, an optional daily cap, and if Telegram ever returns a flood limit the bot waits exactly as long as Telegram asks and retries.
+- **Quiet hours** — optional do-not-disturb window (e.g. `23-7` in the channel's timezone): news queue up overnight and publish in the morning.
+
+### Operations
+
+- **Resilient fetching** — 3 retries per feed with exponential backoff, 30s timeout, separate handling for timeouts, network errors, TLS failures and malformed XML. One dead source never blocks the others.
+- **AI retries** — `429` (rate limit) and `503` (model busy) are retried with 5s and 10s pauses. A daily-quota `429` fails fast instead, since that quota only resets the next day.
+- **Demo mode** — `python main.py --demo [N]` publishes N fresh posts immediately and exits: no schedule, no quiet hours, no daily cap. Useful for showing the channel to a client.
+- **Admin commands in Telegram** — see below.
+
+## Admin commands
+
+Send these to the bot in a private chat; they only answer the `ADMIN_ID` account.
+
+| Command | What it does |
+|---|---|
+| `/stats` | Posts total and today, queue size, keyword count, publishing status |
+| `/keywords`, `/add_kw`, `/del_kw` | Manage the keyword filter at runtime |
+| `/sources`, `/add_source`, `/del_source` | Manage RSS feeds; a new feed is validated before it is saved |
+| `/pause`, `/resume` | Hold publishing without stopping the bot — news keep queueing |
+| `/delete_last` | Remove the latest post from both the channel and the database |
 
 ## Quick start
 
@@ -36,46 +99,71 @@ cd ev-news-bot
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill in your values
-python main.py
+python main.py         # or: python main.py --demo 3
 ```
 
 ## Configuration
 
-All secrets are set via environment variables (`.env` is supported):
+Secrets and tuning go through environment variables (`.env` is supported).
 
-| Variable      | Required | Description                                                        |
-|---------------|----------|--------------------------------------------------------------------|
-| `BOT_TOKEN`   | yes      | Bot token from [@BotFather](https://t.me/BotFather)                |
-| `CHANNEL_ID`  | yes      | Target channel ID (e.g. `-1001234567890`); the bot must be an admin |
-| `ADMIN_ID`    | yes      | Telegram user ID allowed to run admin commands                     |
-| `MANAGER_URL` | no       | Link for the inline button under posts; omit to post without a button |
-| `DB_PATH`     | no       | Database file location (default `news_production.db`); point it at a mounted volume in production |
-| `QUIET_HOURS` | no       | Do-not-disturb window as `start-end` hours, e.g. `23-7`; omit to post around the clock |
-| `TIMEZONE`    | no       | IANA timezone for quiet hours, e.g. `Asia/Almaty` (default `UTC`) |
-| `GEMINI_API_KEY` | no    | Enables AI rewrite of posts ([aistudio.google.com](https://aistudio.google.com)); unset = plain translation |
-| `GEMINI_MODEL` | no      | Gemini model for the rewrite (default `gemini-2.5-flash`) |
-| `MAX_POSTS_PER_DAY` | no | Daily post cap counted per `TIMEZONE` day; unset = unlimited |
-| `MAX_NEWS_AGE_HOURS` | no | Never publish articles older than this (default `24`; `0` = no limit) |
-| `QUEUE_GRACE_HOURS` | no | Extra hours granted to articles already waiting in the queue (default `12`) |
-| `SIMILARITY_CANDIDATE` | no | Title similarity above which a pair is sent to the AI duplicate check (default `0.3`) |
-| `SIMILARITY_THRESHOLD` | no | Lexical duplicate threshold, used only when the AI check is unavailable (default `0.7`) |
+### Required
 
-Tuning lives in [config.py](config.py): posting interval (`POST_DELAY`), database name. RSS sources and the keyword filter are managed from Telegram at runtime; `RSS_URLS` in [config.py](config.py) and [keywords.json](keywords.json) only seed the initial lists on first run.
+| Variable | Description |
+|---|---|
+| `BOT_TOKEN` | Bot token from [@BotFather](https://t.me/BotFather) |
+| `CHANNEL_ID` | Target channel ID (e.g. `-1001234567890`); the bot must be an admin |
+| `ADMIN_ID` | Telegram user ID allowed to run admin commands |
+
+### Lead generation
+
+| Variable | Description |
+|---|---|
+| `WHATSAPP_PHONE` | Dealership WhatsApp number, digits only; empty = no WhatsApp button |
+| `TELEGRAM_USERNAME` | Telegram nick for the second button, without `@`; empty = no Telegram button |
+| `BUTTON_TEXT` / `TELEGRAM_BUTTON_TEXT` | Button captions |
+| `WHATSAPP_MESSAGE` | Pre-filled enquiry text; `{title}` is replaced with the post headline |
+| `CTA_TEXT` | Fixed call-to-action line at the end of every post; empty removes it |
+| `PRICE_NOTE` | Line appended when a post mentions a price in yuan or dollars |
+| `MANAGER_URL` | Legacy single-button fallback, used only when no phone and no nick are set |
+
+### AI
+
+| Variable | Description |
+|---|---|
+| `GEMINI_API_KEY` | Enables AI rewrite and the relevance/duplicate checks ([aistudio.google.com](https://aistudio.google.com)); unset = plain translation |
+| `GEMINI_MODEL` | Model for all AI calls (default `gemini-3.8-flash`) |
+| `SIMILARITY_CANDIDATE` | Title similarity above which a pair is sent to the AI duplicate check (default `0.3`) |
+| `SIMILARITY_THRESHOLD` | Lexical duplicate threshold, used only when the AI is unavailable (default `0.7`) |
+
+### Scheduling and storage
+
+| Variable | Description |
+|---|---|
+| `MAX_POSTS_PER_DAY` | Daily post cap counted per `TIMEZONE` day; unset = unlimited |
+| `MAX_NEWS_AGE_HOURS` | Never publish articles older than this (default `24`; `0` = no limit) |
+| `QUEUE_GRACE_HOURS` | Extra hours granted to articles already waiting in the queue (default `12`) |
+| `QUIET_HOURS` | Do-not-disturb window as `start-end` hours, e.g. `23-7` |
+| `TIMEZONE` | IANA timezone for quiet hours and daily counters, e.g. `Asia/Almaty` (default `UTC`) |
+| `DB_PATH` | Database file location (default `news_production.db`); point it at a mounted volume in production. `DATABASE_URL` is accepted too, including the `sqlite:///file` form |
+
+### Lists in code
+
+[config.py](config.py) holds `KZ_BRANDS` (the brand filter), `RSS_URLS` and `SOURCE_NAMES` (initial feeds and their display names), and `POST_DELAY`. RSS feeds and keywords are managed from Telegram at runtime — `RSS_URLS` seeds the list on first run, and keywords from [keywords.json](keywords.json) are topped up into the database on every start.
 
 ## Project structure
 
 ```
-├── main.py           # entry point: dispatcher, posting queue, parse scheduler
-├── parser.py         # RSS fetching with retries, keyword filter, translation chain
-├── database.py       # async SQLite layer: deduplication, post log
-├── config.py         # env-based configuration
-├── keywords.json     # keyword filter (hot-reloaded)
-└── requirements.txt
+├── main.py           # entry point, queue, publishing, admin commands, demo mode
+├── parser.py         # RSS fetching, filters, AI calls, translation chain
+├── database.py       # async SQLite: deduplication, keywords, sources, post log
+├── config.py         # configuration and the brand list
+├── keywords.json     # starter keywords, topped up into the database on start
+└── tests/            # 108 unit tests
 ```
 
 ## Tests
 
-Unit tests cover the keyword filter, URL normalization, image extraction, quiet-hours logic and the whole database layer. They run on every push via GitHub Actions.
+108 unit tests cover the keyword and brand filters, URL normalization, summary and image extraction, caption limits, post assembly, enquiry buttons, the price note, quiet hours, demo mode and the whole database layer. They run on every push via GitHub Actions.
 
 ```bash
 pip install -r requirements-dev.txt
@@ -84,11 +172,11 @@ pytest
 
 ## Deployment
 
-The bot uses long polling — no webhooks, ports, or reverse proxy needed. It runs anywhere Python runs: a VPS (`python main.py` under systemd), Railway (deploy as a worker with start command `python main.py`), or Docker.
+The bot uses long polling — no webhooks, ports, or reverse proxy needed. It runs anywhere Python runs: a VPS (`python main.py` under systemd), Railway, or Docker.
 
 ### Railway
 
-Deploy from this GitHub repo — the `Procfile` provides the start command. Set the environment variables from the table above, attach a volume mounted at `/data`, and set `DB_PATH=/data/news_production.db` so deduplication survives redeploys.
+Deploy from this GitHub repo — the `Procfile` provides the start command. Set the environment variables above, attach a volume mounted at `/data`, and set `DB_PATH=/data/news_production.db` so deduplication survives redeploys.
 
 ### Docker
 
