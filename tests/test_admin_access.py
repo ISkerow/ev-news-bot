@@ -49,6 +49,8 @@ class CountingDB:
     async def get_sources(self): return ["https://feed/"]
     async def get_stats(self, *a): return {"total": 1, "today": 1}
     async def get_last_post(self): return {"url": "u", "title": "t", "message_id": 1}
+    async def get_recent_posts(self, limit=5):
+        return [{"url": "u", "title": "t", "message_id": 1, "posted_at": "now"}]
 
 
 def registered_commands():
@@ -103,7 +105,14 @@ async def test_admin_is_served(name, monkeypatch):
     monkeypatch.setattr(main.queue_manager, "db", db)
     monkeypatch.setattr(config, "ADMIN_ID", STRANGER_ID)  # теперь гость — админ
 
+    monkeypatch.setattr(main.NewsParser, "fetch_rss",
+                        staticmethod(lambda *a, **k: _no_news()))
+
     message = FakeMessage(STRANGER_ID)
     await call(registered_commands()[name], message)
 
     assert message.replies, f"/{name} не ответил даже админу"
+
+
+async def _no_news():
+    return []

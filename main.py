@@ -204,12 +204,14 @@ class QueueManager:
             text = assemble(shortened)
         return text
 
-    async def _send_post(self, item: dict, text: str, kb):
-        """С обложкой — фото-пост, иначе текстовый. Флуд-лимит пробрасываем наверх."""
+    async def _send_post(self, item: dict, text: str, kb, chat_id=None):
+        """С обложкой — фото-пост, иначе текстовый. Флуд-лимит пробрасываем наверх.
+        chat_id задаётся для предпросмотра — тогда пост уходит админу, а не в канал."""
+        chat_id = chat_id or config.CHANNEL_ID
         if item.get('image'):
             try:
                 msg = await self.bot.send_photo(
-                    chat_id=config.CHANNEL_ID,
+                    chat_id=chat_id,
                     photo=item['image'],
                     caption=text,
                     reply_markup=kb
@@ -221,37 +223,34 @@ class QueueManager:
             except Exception as e:
                 logger.warning(f"Фото не отправилось ({e}), публикуем текстом")
         return await self.bot.send_message(
-            chat_id=config.CHANNEL_ID,
+            chat_id=chat_id,
             text=text,
             reply_markup=kb,
             disable_web_page_preview=False
         )
 
-    async def publish(self, item: dict):
-        """Готовит и публикует одну новость: картинка, текст, кнопка, отправка, запись в базу.
-        Используется и обычным расписанием, и демо-режимом."""
-        # Если в RSS не было картинки — пробуем взять og:image со страницы статьи
+    async def render(self, item: dict):
+        """Готовит пост (картинка, текст, кнопки), ничего не отправляя."""
         if not item.get('image'):
             item['image'] = await NewsParser.fetch_og_image(item['url'])
-
-        # Цепочка: ИИ-рерайт (если настроен) → обычный перевод
         rewritten = await NewsParser.rewrite_with_ai(item['title_en'], item.get('summary_en', ''))
         if rewritten:
-            title_ru = rewritten['title']
-            summary_ru = rewritten['summary']
+            title_ru, summary_ru = rewritten['title'], rewritten['summary']
         else:
-            # Переводчик синхронный (requests) — уводим в поток, чтобы не морозить event loop
             title_ru = await asyncio.to_thread(NewsParser.translate_title, item['title_en'])
             summary_ru = ""
             if item.get('summary_en'):
                 summary_ru = await asyncio.to_thread(NewsParser.translate_title, item['summary_en'])
-
-        kb = self._build_keyboard(title_ru)
-        # С фото действует лимит подписи Telegram, без фото — лимит сообщения
         text = self._build_text(
             item, title_ru, summary_ru,
             limit=CAPTION_LIMIT if item.get('image') else None,
         )
+        return title_ru, text, self._build_keyboard(title_ru)
+
+    async def publish(self, item: dict):
+        """Готовит и публикует одну новость: картинка, текст, кнопка, отправка, запись в базу.
+        Используется и обычным расписанием, и демо-режимом."""
+        title_ru, text, kb = await self.render(item)
 
         # Флуд-лимит: Telegram сам называет паузу — ждём и повторяем один раз
         try:
@@ -477,6 +476,59 @@ async def cmd_resume(message: types.Message):
         return
     queue_manager.paused = False
     await message.answer("▶️ Публикация возобновлена.")
+
+@router.message(Command("preview"))
+async def cmd_preview(message: types.Message):
+    """Присылает готовый пост сюда, в личку, ничего не публикуя в канал."""
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    await message.answer("Готовлю пост…")
+    news = await NewsParser.fetch_rss(
+        await db.get_keywords(), await db.get_sources(), await db.get_brands()
+    )
+    for item in news:
+        if await db.url_exists(item['url']):
+            continue
+        _, text, kb = await queue_manager.render(item)
+        await queue_manager._send_post(item, text, kb, chat_id=message.chat.id)
+        return await message.answer(
+            "👆 Так пост выйдет в канал. В канал он не отправлен."
+        )
+    await message.answer("Новых подходящих новостей сейчас нет.")
+
+@router.message(Command("last"))
+async def cmd_last(message: types.Message):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    posts = await db.get_recent_posts(5)
+    if not posts:
+        return await message.answer("В канале пока нет постов.")
+    lines = [f"{i}. {html.escape(p['title'] or '(без заголовка)')[:70]}"
+             for i, p in enumerate(posts, 1)]
+    await message.answer(
+        "🗂 Последние посты:\n" + "\n".join(lines) +
+        "\n\nУдалить: /del номер"
+    )
+
+@router.message(Command("del"))
+async def cmd_del(message: types.Message, command: CommandObject):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    arg = (command.args or "").strip()
+    if not arg.isdigit():
+        return await message.answer("Использование: /del номер из /last")
+    posts = await db.get_recent_posts(5)
+    idx = int(arg)
+    if not 1 <= idx <= len(posts):
+        return await message.answer("Нет поста с таким номером — сверьтесь со /last.")
+    post = posts[idx - 1]
+    try:
+        await bot.delete_message(chat_id=config.CHANNEL_ID, message_id=post['message_id'])
+    except Exception as e:
+        # Пост мог быть удалён вручную или устареть — из базы убираем в любом случае
+        logger.warning(f"Сообщение {post['message_id']} не удалилось из канала: {e}")
+    await db.delete_post_from_db(post['url'])
+    await message.answer(f"🗑 Удалено: {html.escape(post['title'] or '')[:70]}")
 
 @router.message(Command("delete_last"))
 async def cmd_delete_last(message: types.Message):
