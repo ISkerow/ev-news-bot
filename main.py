@@ -12,7 +12,8 @@ from aiogram import Bot, Dispatcher, types, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (BotCommand, BotCommandScopeChat, BotCommandScopeDefault,
+                           InlineKeyboardMarkup, InlineKeyboardButton)
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.exceptions import TelegramRetryAfter
 
@@ -560,6 +561,46 @@ async def scheduled_parser():
         logger.info(f"✅ Найдено новых целевых новостей: {added}")
         await asyncio.sleep(1800)
 
+# Меню, которое Telegram показывает по «/». Порядок — от частого к редкому.
+ADMIN_COMMANDS = [
+    BotCommand(command="stats", description="Статистика: посты, очередь, статус"),
+    BotCommand(command="preview", description="Показать следующий пост, не публикуя"),
+    BotCommand(command="last", description="Последние 5 постов"),
+    BotCommand(command="del", description="Удалить пост по номеру из /last"),
+    BotCommand(command="brands", description="Марки в фильтре"),
+    BotCommand(command="add_brand", description="Добавить марку"),
+    BotCommand(command="del_brand", description="Убрать марку"),
+    BotCommand(command="keywords", description="Ключевые слова"),
+    BotCommand(command="add_kw", description="Добавить ключевое слово"),
+    BotCommand(command="del_kw", description="Убрать ключевое слово"),
+    BotCommand(command="sources", description="RSS-источники"),
+    BotCommand(command="add_source", description="Добавить источник"),
+    BotCommand(command="del_source", description="Убрать источник"),
+    BotCommand(command="pause", description="Приостановить публикацию"),
+    BotCommand(command="resume", description="Возобновить публикацию"),
+    BotCommand(command="delete_last", description="Удалить последний пост"),
+    BotCommand(command="start", description="Проверить, что бот работает"),
+]
+
+
+async def setup_commands():
+    """Меню по «/» показываем только админу: подписчикам канала список команд
+    управления видеть незачем. Остальным меню очищаем — вдруг раньше его
+    настраивали через BotFather глобально."""
+    if not config.ADMIN_ID:
+        logger.warning("ADMIN_ID не задан — меню команд не настроено")
+        return
+    try:
+        await bot.set_my_commands([], scope=BotCommandScopeDefault())
+        await bot.set_my_commands(
+            ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=config.ADMIN_ID)
+        )
+        logger.info(f"Меню из {len(ADMIN_COMMANDS)} команд настроено для админа")
+    except Exception as e:
+        # Не критично: команды работают и без меню
+        logger.warning(f"Не удалось настроить меню команд: {e}")
+
+
 async def prepare_db():
     """Готовит базу: таблицы и стартовые списки слов и источников."""
     # Печатаем путь к базе: если переменные заданы неверно, база молча уедет
@@ -639,6 +680,7 @@ async def main():
     asyncio.create_task(scheduled_parser())
     
     await bot.delete_webhook(drop_pending_updates=True)
+    await setup_commands()
     logger.info("🚀 Бот успешно запущен!")
     await dp.start_polling(bot)
 
