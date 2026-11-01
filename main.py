@@ -440,8 +440,9 @@ async def cmd_resume(message: types.Message):
 
 @router.message(Command("delete_last"))
 async def cmd_delete_last(message: types.Message):
+    # Постороннему не отвечаем вовсе: молчание не подсказывает, что команда есть
     if message.from_user.id != config.ADMIN_ID:
-        return await message.answer("Нет прав.")
+        return
 
     last_post = await db.get_last_post()
     if not last_post:
