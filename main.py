@@ -492,6 +492,21 @@ async def run_demo(count: int):
     news = await NewsParser.fetch_rss(keywords, sources)
 
     published = 0
+    held_back = []  # отсеянные фильтром интереса — запас на случай нехватки
+
+    async def send(item) -> bool:
+        nonlocal published
+        try:
+            await queue_manager.publish(item)
+        except Exception as e:
+            logger.error(f"Не удалось опубликовать «{item['title_en'][:60]}»: {e}")
+            return False
+        published += 1
+        if published < count:
+            # Короткая пауза между постами, чтобы не словить флуд-лимит Telegram
+            await asyncio.sleep(DEMO_POST_DELAY)
+        return True
+
     for item in news:
         if published >= count:
             break
@@ -500,20 +515,23 @@ async def run_demo(count: int):
         if await queue_manager._is_duplicate_story(item):
             continue  # та же история с другого сайта
         if not await queue_manager._is_interesting(item):
-            continue  # новость не про выбор машины
-        try:
-            await queue_manager.publish(item)
-            published += 1
-        except Exception as e:
-            logger.error(f"Не удалось опубликовать «{item['title_en'][:60]}»: {e}")
+            held_back.append(item)  # не про выбор машины, но пусть будет в запасе
             continue
-        if published < count:
-            # Короткая пауза между постами, чтобы не словить флуд-лимит Telegram
-            await asyncio.sleep(DEMO_POST_DELAY)
+        await send(item)
+
+    # Канал не должен оставаться пустым: в дни отчётов все новости оказываются
+    # «не про выбор машины». Тогда добираем лучшее из отсеянного.
+    if published < count and held_back:
+        logger.info(f"Подходящих новостей мало — добираем {min(count - published, len(held_back))} из отсеянных")
+        for item in held_back:
+            if published >= count:
+                break
+            queue_manager.skipped.discard(item['url'])
+            await send(item)
 
     if published < count:
         logger.warning(
-            f"Свежих подходящих новостей хватило только на {published} из {count}. "
+            f"Свежих новостей хватило только на {published} из {count}. "
             "Попробуйте позже или расширьте список марок в config.KZ_BRANDS."
         )
     logger.info(f"🎬 Демо завершено: опубликовано {published} постов")
