@@ -94,6 +94,8 @@ The whole bot is operated from Telegram — no config edits, no redeploys. Send 
 | `/pause`, `/resume` | Hold publishing without stopping the bot — news keep queueing |
 | `/delete_last` | Shortcut for removing the most recent post |
 
+The command list is registered with Telegram on startup for the admin chat only (`BotCommandScopeChat`), so it appears in the `/` menu for the owner and stays hidden from channel subscribers.
+
 **Access control.** Every command answers only the account whose Telegram ID is in `ADMIN_ID`; to anyone else the bot stays silent, which does not even confirm the command exists. This is enforced by a test that walks every registered command, calls it as a stranger and asserts nothing is returned and nothing is written — so a new command added without a guard fails the build.
 
 ## Quick start
