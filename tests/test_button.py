@@ -39,12 +39,14 @@ def test_cyrillic_and_spaces_are_encoded(monkeypatch):
 
 def test_falls_back_to_manager_url(monkeypatch):
     monkeypatch.setattr(config, "WHATSAPP_PHONE", "")
+    monkeypatch.setattr(config, "TELEGRAM_USERNAME", "")
     monkeypatch.setattr(config, "MANAGER_URL", "https://t.me/manager")
     assert button(main.QueueManager._build_keyboard("Новость")).url == "https://t.me/manager"
 
 
 def test_no_button_when_nothing_configured(monkeypatch):
     monkeypatch.setattr(config, "WHATSAPP_PHONE", "")
+    monkeypatch.setattr(config, "TELEGRAM_USERNAME", "")
     monkeypatch.setattr(config, "MANAGER_URL", "")
     assert main.QueueManager._build_keyboard("Новость") is None
 
