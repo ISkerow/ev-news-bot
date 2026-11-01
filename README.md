@@ -49,7 +49,7 @@ Every AI step degrades gracefully: no API key or a failing API never drops a pos
 
 ### Content selection
 
-- **Brand filter** — a story is published only if one of `KZ_BRANDS` (Zeekr, Li Auto/LiXiang, BYD, Denza, Yangwang, Xiaomi, Avatr, Changan, Deepal) appears in its title or summary. Word-boundary matching, so `Avatr` never matches "avatar". An empty list disables the filter.
+- **Brand filter** — a story is published only if one of the configured brands (Zeekr, Li Auto/LiXiang, BYD, Denza, Yangwang, Xiaomi, Avatr, Changan, Deepal) appears in its title or summary. The list lives in the database and is edited from Telegram with `/add_brand`; `KZ_BRANDS` in config only seeds it on first run. Word-boundary matching, so `Avatr` never matches "avatar". An empty list disables the filter.
 - **Hybrid coverage** — PHEV, EREV, REEV, DM-i, DM-p and plug-in hybrid are first-class keywords, not just battery EVs.
 - **AI relevance check** — before publishing, the model is asked whether the story matters to someone *choosing a car*. Model launches, specs, prices, range, reviews and test drives pass; company financials, headcount, factory construction, politics, subsidies and foreign charging infrastructure are skipped.
 - **Two-level deduplication** — SQLite keyed by normalized article URL (tracking parameters stripped), plus cross-source story detection: lexical similarity picks candidates from the last 48h and the AI decides, because word overlap alone cannot tell "BYD starts production" from "BYD halts production". Without an API key it falls back to a conservative lexical threshold.
@@ -81,15 +81,20 @@ Every AI step degrades gracefully: no API key or a failing API never drops a pos
 
 ## Admin commands
 
-Send these to the bot in a private chat; they only answer the `ADMIN_ID` account.
+The whole bot is operated from Telegram — no config edits, no redeploys. Send these in a private chat with the bot.
 
 | Command | What it does |
 |---|---|
 | `/stats` | Posts total and today, queue size, keyword count, publishing status |
-| `/keywords`, `/add_kw`, `/del_kw` | Manage the keyword filter at runtime |
+| `/preview` | Renders the next unpublished story and sends it **to you**, not to the channel — the same photo, text and buttons subscribers would see |
+| `/brands`, `/add_brand`, `/del_brand` | Manage the brand filter; deleting accepts a number from `/brands` |
+| `/keywords`, `/add_kw`, `/del_kw` | Manage the keyword filter |
 | `/sources`, `/add_source`, `/del_source` | Manage RSS feeds; a new feed is validated before it is saved |
+| `/last`, `/del <n>` | List the five most recent posts and delete any of them from the channel and the database |
 | `/pause`, `/resume` | Hold publishing without stopping the bot — news keep queueing |
-| `/delete_last` | Remove the latest post from both the channel and the database |
+| `/delete_last` | Shortcut for removing the most recent post |
+
+**Access control.** Every command answers only the account whose Telegram ID is in `ADMIN_ID`; to anyone else the bot stays silent, which does not even confirm the command exists. This is enforced by a test that walks every registered command, calls it as a stranger and asserts nothing is returned and nothing is written — so a new command added without a guard fails the build.
 
 ## Quick start
 
@@ -140,7 +145,8 @@ Secrets and tuning go through environment variables (`.env` is supported).
 | Variable | Description |
 |---|---|
 | `MAX_POSTS_PER_DAY` | Daily post cap counted per `TIMEZONE` day; unset = unlimited |
-| `MAX_NEWS_AGE_HOURS` | Never publish articles older than this (default `24`; `0` = no limit) |
+| `MAX_NEWS_AGE_HOURS` | Never publish articles older than this (default `72`; `0` = no limit) |
+| `DEMO_FALLBACK` | `true` lets `--demo` top up with stories the relevance filter rejected, when relevant ones run out (default `false`) |
 | `QUEUE_GRACE_HOURS` | Extra hours granted to articles already waiting in the queue (default `12`) |
 | `QUIET_HOURS` | Do-not-disturb window as `start-end` hours, e.g. `23-7` |
 | `TIMEZONE` | IANA timezone for quiet hours and daily counters, e.g. `Asia/Almaty` (default `UTC`) |
@@ -148,7 +154,7 @@ Secrets and tuning go through environment variables (`.env` is supported).
 
 ### Lists in code
 
-[config.py](config.py) holds `KZ_BRANDS` (the brand filter), `RSS_URLS` and `SOURCE_NAMES` (initial feeds and their display names), and `POST_DELAY`. RSS feeds and keywords are managed from Telegram at runtime — `RSS_URLS` seeds the list on first run, and keywords from [keywords.json](keywords.json) are topped up into the database on every start.
+[config.py](config.py) holds `KZ_BRANDS` (the brand filter), `RSS_URLS` and `SOURCE_NAMES` (initial feeds and their display names), and `POST_DELAY`. Brands, RSS feeds and keywords are managed from Telegram at runtime — `KZ_BRANDS` and `RSS_URLS` seed the lists on first run, and keywords from [keywords.json](keywords.json) are topped up into the database on every start.
 
 ## Project structure
 
@@ -163,7 +169,7 @@ Secrets and tuning go through environment variables (`.env` is supported).
 
 ## Tests
 
-108 unit tests cover the keyword and brand filters, URL normalization, summary and image extraction, caption limits, post assembly, enquiry buttons, the price note, quiet hours, demo mode and the whole database layer. They run on every push via GitHub Actions.
+155 unit tests cover the keyword and brand filters, URL normalization, summary and image extraction, caption limits, post assembly, enquiry buttons, the price note, quiet hours, demo mode, admin-only access to every command, and the whole database layer. They run on every push via GitHub Actions.
 
 ```bash
 pip install -r requirements-dev.txt
