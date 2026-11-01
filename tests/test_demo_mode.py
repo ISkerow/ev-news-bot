@@ -89,3 +89,28 @@ def test_retriable_statuses_cover_rate_limit_and_overload():
     assert parser_module.RETRIABLE_STATUSES == {429, 503}
     assert parser_module.GEMINI_ATTEMPTS >= 2
     assert parser_module.GEMINI_RETRY_DELAY > 0
+
+
+async def test_demo_falls_back_to_held_back_news(monkeypatch, demo_env):
+    """Все новости «не про выбор машины» — канал всё равно не остаётся пустым."""
+    monkeypatch.setattr(main, "db", FakeDB())
+    monkeypatch.setattr(NewsParser, "fetch_rss",
+                        staticmethod(lambda *a, **k: _async_value(news(5))))
+    monkeypatch.setattr(main.queue_manager, "_is_interesting", lambda item: _async_false())
+    await main.run_demo(3)
+    assert len(demo_env) == 3
+
+
+async def test_interesting_news_go_first(monkeypatch, demo_env):
+    """Запас используется только после того, как кончились подходящие новости."""
+    monkeypatch.setattr(main, "db", FakeDB())
+    items = news(4)
+    monkeypatch.setattr(NewsParser, "fetch_rss",
+                        staticmethod(lambda *a, **k: _async_value(items)))
+    # интересна только последняя новость
+    async def only_last(item):
+        return item["url"] == items[-1]["url"]
+    monkeypatch.setattr(main.queue_manager, "_is_interesting", only_last)
+    await main.run_demo(2)
+    assert demo_env[0]["url"] == items[-1]["url"]   # сначала подходящая
+    assert len(demo_env) == 2                        # вторая добрана из запаса

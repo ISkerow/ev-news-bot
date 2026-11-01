@@ -37,9 +37,11 @@ async def test_publishes_when_ai_unavailable(monkeypatch):
 
 def test_prompt_covers_both_lists():
     p = NewsParser.INTEREST_PROMPT.lower()
-    for word in ("новую модель", "характеристики", "цены на автомобиль", "тест-драйв"):
+    for word in ("новую модель", "характеристики", "цены на автомобиль", "тест-драйв",
+                 "рост продаж"):  # отчёты о продажах моделей теперь проходят
         assert word in p
-    for word in ("финансы", "численность сотрудников", "строительство заводов", "политику"):
+    for word in ("финансовую отчётность", "численность сотрудников",
+                 "строительство заводов", "политику", "падение продаж"):
         assert word in p
 
 
