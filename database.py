@@ -17,6 +17,7 @@ class Database:
             """)
             await db.execute("CREATE TABLE IF NOT EXISTS keywords (word TEXT PRIMARY KEY)")
             await db.execute("CREATE TABLE IF NOT EXISTS sources (url TEXT PRIMARY KEY)")
+            await db.execute("CREATE TABLE IF NOT EXISTS brands (name TEXT PRIMARY KEY)")
             # Миграция для старых баз: колонка появилась позже самой таблицы
             try:
                 await db.execute("ALTER TABLE sent_news ADD COLUMN title_en TEXT")
@@ -94,6 +95,42 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("DELETE FROM sent_news WHERE url = ?", (url,))
             await db.commit()
+
+    # --- Марки (в базе, чтобы менять их из Telegram без правки кода) ---
+
+    async def seed_brands(self, names: list):
+        """Одноразовое заполнение из config при первом запуске."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM brands")
+            if (await cursor.fetchone())[0] == 0 and names:
+                await db.executemany(
+                    "INSERT OR IGNORE INTO brands (name) VALUES (?)",
+                    [(n.strip(),) for n in names if n.strip()]
+                )
+                await db.commit()
+
+    async def get_brands(self) -> list:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT name FROM brands ORDER BY name COLLATE NOCASE")
+            return [row[0] for row in await cursor.fetchall()]
+
+    async def add_brand(self, name: str) -> bool:
+        """False, если марка уже в списке (сравнение без учёта регистра)."""
+        name = name.strip()
+        if not name or name.lower() in {b.lower() for b in await self.get_brands()}:
+            return False
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("INSERT OR IGNORE INTO brands (name) VALUES (?)", (name,))
+            await db.commit()
+        return True
+
+    async def remove_brand(self, name: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM brands WHERE name = ? COLLATE NOCASE", (name.strip(),)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
     # --- RSS-источники (тоже в базе — редактируются из Telegram) ---
 
