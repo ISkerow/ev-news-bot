@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import config
 import main
 import parser as parser_module
 from parser import NewsParser
@@ -17,6 +18,8 @@ class FakeDB:
     async def seed_sources(self, urls): pass
     async def get_keywords(self): return ["byd"]
     async def get_sources(self): return ["https://feed"]
+    async def get_brands(self): return ["BYD"]
+    async def seed_brands(self, names): pass
     async def url_exists(self, url): return url in self.known
 
 
@@ -91,8 +94,20 @@ def test_retriable_statuses_cover_rate_limit_and_overload():
     assert parser_module.GEMINI_RETRY_DELAY > 0
 
 
-async def test_demo_falls_back_to_held_back_news(monkeypatch, demo_env):
-    """Все новости «не про выбор машины» — канал всё равно не остаётся пустым."""
+async def test_fallback_is_off_by_default(monkeypatch, demo_env):
+    """По умолчанию запас не используется: лучше меньше постов, чем не по теме."""
+    monkeypatch.setattr(config, "DEMO_FALLBACK", False)
+    monkeypatch.setattr(main, "db", FakeDB())
+    monkeypatch.setattr(NewsParser, "fetch_rss",
+                        staticmethod(lambda *a, **k: _async_value(news(5))))
+    monkeypatch.setattr(main.queue_manager, "_is_interesting", lambda item: _async_false())
+    await main.run_demo(3)
+    assert demo_env == []
+
+
+async def test_demo_falls_back_when_enabled(monkeypatch, demo_env):
+    """С DEMO_FALLBACK=true канал не остаётся пустым."""
+    monkeypatch.setattr(config, "DEMO_FALLBACK", True)
     monkeypatch.setattr(main, "db", FakeDB())
     monkeypatch.setattr(NewsParser, "fetch_rss",
                         staticmethod(lambda *a, **k: _async_value(news(5))))
@@ -103,6 +118,7 @@ async def test_demo_falls_back_to_held_back_news(monkeypatch, demo_env):
 
 async def test_interesting_news_go_first(monkeypatch, demo_env):
     """Запас используется только после того, как кончились подходящие новости."""
+    monkeypatch.setattr(config, "DEMO_FALLBACK", True)
     monkeypatch.setattr(main, "db", FakeDB())
     items = news(4)
     monkeypatch.setattr(NewsParser, "fetch_rss",

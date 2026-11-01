@@ -40,3 +40,41 @@ def test_word_boundaries_hold():
 def test_empty_brand_list_disables_filter(monkeypatch):
     monkeypatch.setattr(config, "KZ_BRANDS", [])
     assert NewsParser.has_target_brand("Any news at all")
+
+
+# --- Марки в базе, управляемые командами ---
+
+import pytest
+from database import Database
+
+
+@pytest.fixture
+async def db(tmp_path):
+    database = Database(str(tmp_path / "b.db"))
+    await database.init_db()
+    return database
+
+
+async def test_brands_seeded_from_config(db):
+    await db.seed_brands(["BYD", "Zeekr"])
+    assert await db.get_brands() == ["BYD", "Zeekr"]
+    await db.seed_brands(["Tesla"])          # повторный посев игнорируется
+    assert "Tesla" not in await db.get_brands()
+
+
+async def test_add_and_remove_brand(db):
+    await db.seed_brands(["BYD"])
+    assert await db.add_brand("Leapmotor")
+    assert not await db.add_brand("leapmotor")   # дубль в другом регистре
+    assert await db.remove_brand("LEAPMOTOR")    # удаляется без учёта регистра
+    assert not await db.remove_brand("Nio")      # такой марки не было
+
+
+async def test_filter_uses_brands_from_database():
+    """Фильтр работает по переданному списку, а не по тому, что в config."""
+    assert NewsParser.has_target_brand("Leapmotor C10 review", brands=["Leapmotor"])
+    assert not NewsParser.has_target_brand("BYD Seal review", brands=["Leapmotor"])
+
+
+async def test_empty_database_list_disables_filter():
+    assert NewsParser.has_target_brand("Any car news", brands=[])

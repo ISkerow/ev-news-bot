@@ -37,6 +37,9 @@ class CountingDB:
     def __init__(self):
         self.writes = 0
 
+    async def add_brand(self, n): self.writes += 1; return True
+    async def remove_brand(self, n): self.writes += 1; return True
+    async def get_brands(self): return ["BYD"]
     async def add_keyword(self, w): self.writes += 1; return True
     async def remove_keyword(self, w): self.writes += 1; return True
     async def add_source(self, u): self.writes += 1; return True

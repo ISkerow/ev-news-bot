@@ -376,6 +376,46 @@ async def cmd_del_kw(message: types.Message, command: CommandObject):
     else:
         await message.answer(f"«{word}» нет в списке.")
 
+@router.message(Command("brands"))
+async def cmd_brands(message: types.Message):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    brands = await db.get_brands()
+    if not brands:
+        return await message.answer("Список марок пуст — публикуются все EV-новости.")
+    lines = [f"{i}. {html.escape(b)}" for i, b in enumerate(brands, 1)]
+    await message.answer("🚘 Марки в фильтре:\n" + "\n".join(lines))
+
+@router.message(Command("add_brand"))
+async def cmd_add_brand(message: types.Message, command: CommandObject):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    if not command.args:
+        return await message.answer("Использование: /add_brand Leapmotor")
+    name = command.args.strip()
+    if await db.add_brand(name):
+        await message.answer(f"✅ Марка добавлена: «{html.escape(name)}»")
+    else:
+        await message.answer(f"«{html.escape(name)}» уже в списке.")
+
+@router.message(Command("del_brand"))
+async def cmd_del_brand(message: types.Message, command: CommandObject):
+    if message.from_user.id != config.ADMIN_ID:
+        return
+    arg = (command.args or "").strip()
+    if not arg:
+        return await message.answer("Использование: /del_brand номер из /brands (или название)")
+    if arg.isdigit():
+        brands = await db.get_brands()
+        idx = int(arg)
+        if not 1 <= idx <= len(brands):
+            return await message.answer("Нет марки с таким номером — сверьтесь со /brands.")
+        arg = brands[idx - 1]
+    if await db.remove_brand(arg):
+        await message.answer(f"🗑 Марка удалена: «{html.escape(arg)}»")
+    else:
+        await message.answer("Такой марки нет в списке.")
+
 @router.message(Command("sources"))
 async def cmd_sources(message: types.Message):
     if message.from_user.id != config.ADMIN_ID:
@@ -458,9 +498,9 @@ async def cmd_delete_last(message: types.Message):
 async def scheduled_parser():
     while True:
         logger.info("🔍 Запуск парсинга RSS...")
-        keywords = await db.get_keywords()
-        sources = await db.get_sources()
-        news = await NewsParser.fetch_rss(keywords, sources)
+        news = await NewsParser.fetch_rss(
+            await db.get_keywords(), await db.get_sources(), await db.get_brands()
+        )
         added = 0
         for item in news:
             if not await db.url_exists(item['url']) and queue_manager.put_news(item):
@@ -480,6 +520,7 @@ async def prepare_db():
     if added:
         logger.info(f"Добавлены ключевые слова из keywords.json: {', '.join(added)}")
     await db.seed_sources(config.RSS_URLS)
+    await db.seed_brands(config.KZ_BRANDS)
 
 
 async def run_demo(count: int):
@@ -487,9 +528,9 @@ async def run_demo(count: int):
     Расписание, тихие часы и дневной лимит не действуют — это ручной показ."""
     await prepare_db()
     logger.info(f"🎬 Демо-режим: публикуем {count} свежих новостей в канал {config.CHANNEL_ID}")
-    keywords = await db.get_keywords()
-    sources = await db.get_sources()
-    news = await NewsParser.fetch_rss(keywords, sources)
+    news = await NewsParser.fetch_rss(
+        await db.get_keywords(), await db.get_sources(), await db.get_brands()
+    )
 
     published = 0
     held_back = []  # отсеянные фильтром интереса — запас на случай нехватки
@@ -519,9 +560,9 @@ async def run_demo(count: int):
             continue
         await send(item)
 
-    # Канал не должен оставаться пустым: в дни отчётов все новости оказываются
-    # «не про выбор машины». Тогда добираем лучшее из отсеянного.
-    if published < count and held_back:
+    # Запасной набор: в дни отчётов все новости оказываются «не про выбор машины».
+    # По умолчанию выключен — включается через DEMO_FALLBACK=true.
+    if config.DEMO_FALLBACK and published < count and held_back:
         logger.info(f"Подходящих новостей мало — добираем {min(count - published, len(held_back))} из отсеянных")
         for item in held_back:
             if published >= count:

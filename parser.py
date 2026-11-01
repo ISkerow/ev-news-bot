@@ -114,13 +114,15 @@ class NewsParser:
         return bool(NewsParser._build_pattern(tuple(keywords)).search(title))
 
     @staticmethod
-    def has_target_brand(title: str, summary: str = "") -> bool:
-        """Есть ли в новости марка из списка KZ_BRANDS. Пустой список = фильтр выключен.
+    def has_target_brand(title: str, summary: str = "", brands: list = None) -> bool:
+        """Есть ли в новости нужная марка. Список берём из базы (её правят командами),
+        а без него — из config. Пустой список = фильтр выключен.
         Смотрим и заголовок, и описание: в заголовке часто только модель («Denza N8»),
         а марка упомянута в первой строке текста."""
-        if not config.KZ_BRANDS:
+        brands = config.KZ_BRANDS if brands is None else brands
+        if not brands:
             return True
-        pattern = NewsParser._build_pattern(tuple(config.KZ_BRANDS))
+        pattern = NewsParser._build_pattern(tuple(brands))
         return bool(pattern.search(f"{title} {summary}"))
 
     @staticmethod
@@ -446,7 +448,7 @@ class NewsParser:
         return None
 
     @staticmethod
-    async def fetch_rss(keywords: list = None, urls: list = None) -> list:
+    async def fetch_rss(keywords: list = None, urls: list = None, brands: list = None) -> list:
         all_items = []
         if keywords is None:
             keywords = NewsParser.load_keywords()  # Фоллбэк: слова из JSON-файла
@@ -473,7 +475,7 @@ class NewsParser:
                     if summary.rstrip(".…").lower() == entry.title.rstrip(".…").lower():
                         summary = ""
                     # Фильтр марок: для автосалона нужны только машины, которые он продаёт
-                    if not NewsParser.has_target_brand(entry.title, summary):
+                    if not NewsParser.has_target_brand(entry.title, summary, brands):
                         continue
                     source_items.append({
                         "title_en": entry.title,
