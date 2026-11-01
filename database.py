@@ -76,6 +76,16 @@ class Database:
                 (url, title, message_id, title_en))
             await db.commit()
 
+    async def get_recent_posts(self, limit: int = 5) -> list:
+        """Последние опубликованные посты — для списка и удаления по номеру."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT url, title, message_id, posted_at FROM sent_news "
+                "ORDER BY posted_at DESC, rowid DESC LIMIT ?", (limit,)
+            )
+            return [dict(r) for r in await cursor.fetchall()]
+
     async def get_recent_titles(self, since_utc: str) -> list:
         """Английские заголовки постов после since_utc — для дедупликации историй."""
         async with aiosqlite.connect(self.db_path) as db:
