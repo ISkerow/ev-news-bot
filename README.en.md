@@ -12,6 +12,10 @@ Telegram bot for a car dealership channel. It watches EV and hybrid news from RS
 
 Built for the Kazakhstan market (Chinese EV brands), but every filter is configuration, not code.
 
+## Live demo
+
+**[@evbotd](https://t.me/evbotd)** — the channel this bot fills. Posts can be read [right in a browser](https://t.me/s/evbotd), no Telegram needed.
+
 ## What a post looks like
 
 <img src="docs/post-example.webp" width="420" alt="Example post in the channel">
