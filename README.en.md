@@ -14,27 +14,11 @@ Built for the Kazakhstan market (Chinese EV brands), but every filter is configu
 
 ## What a post looks like
 
-```
-🖼  [cover photo from the article]
+<img src="docs/post-example.webp" width="420" alt="Example post in the channel">
 
-Li Auto выпустила обновленный Li i6 2026 года в Китае
+Every post is assembled automatically: cover image from the article, headline and summary rewritten by the AI, source with the story's age, hashtags, a fixed call to action and two enquiry buttons. Both buttons open a chat with the dealership and pre-fill the enquiry text with the headline of that post, so the manager instantly sees which car the customer is asking about.
 
-28 октября 2026 года Li Auto представила модель Li i6 2026 года с обновленным
-оборудованием. Стоимость новинки составляет 249 800 юаней (37 300 долларов),
-а по специальной временной цене автомобиль доступен от 239 800 юаней.
-
-ℹ️ Цена указана для рынка Китая.
-
-📰 CarNewsChina · 22 ч назад · Читать оригинал
-
-#EV #AutoNews #CarNewsChina
-
-Интересуют электромобили? Напишите нам — подберём модель под ваш бюджет.
-
-[ 🚗 Подобрать электромобиль ]  [ ✈️ Написать в Telegram ]
-```
-
-Both buttons open a chat with the dealership and pre-fill the enquiry text, with the headline of that post inserted — the manager instantly sees which car the customer is asking about.
+When a post mentions a price, a "ℹ️ Цена указана для рынка Китая" line is appended after the summary, so a Chinese price is never read as a local one.
 
 ## How it works
 
