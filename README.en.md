@@ -2,6 +2,7 @@
 
 ![Tests](https://github.com/ISkerow/ev-news-bot/actions/workflows/tests.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen)
 ![aiogram](https://img.shields.io/badge/aiogram-3.x-2CA5E0)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -80,6 +81,61 @@ Every AI step degrades gracefully: no API key or a failing API never drops a pos
 - **AI retries** — `429` (rate limit) and `503` (model busy) are retried with 5s and 10s pauses. A daily-quota `429` fails fast instead, since that quota only resets the next day.
 - **Demo mode** — `python main.py --demo [N]` publishes N fresh posts immediately and exits: no schedule, no quiet hours, no daily cap. Useful for showing the channel to a client.
 - **Admin commands in Telegram** — see below.
+
+## Engineering notes
+
+A few places where the obvious fix was the wrong one, and what the measurements showed.
+
+### Raising the similarity threshold disabled duplicate detection instead of tightening it
+
+Several outlets cover the same story, so headlines were compared by the share of words they have in common. A threshold of 0.5 occasionally merged unrelated stories, so it was raised to 0.7 — seemingly stricter.
+
+Measured against real pairs, the ranking was inverted:
+
+| Pair | Similarity |
+|---|---|
+| "Tesla Model Y Gets A Price Cut" / "Tesla slashes Model Y prices" — same story | 0.50 |
+| "Nio reports record Q2 deliveries" / "Nio deliveries hit record" — same story | 0.43 |
+| "BYD **starts** production" / "BYD **halts** production" — **different** | 0.67 |
+
+Different stories score higher than identical ones: the meaning hangs on a single antonym, which word overlap cannot see. A 0.7 threshold did not tighten the filter — it switched it off, letting every real duplicate through.
+
+Lexical scoring now only shortlists candidates and the model makes the call. Dropping stop words, which inflated the denominator, lifted genuine duplicates from 0.22–0.50 to 0.43–0.57. Without an API key the old conservative threshold still applies.
+
+### Model replies were cut off mid-sentence
+
+The AI rewrite silently did nothing: instead of JSON it returned fragments like `72 <= 90. Accurate to facts. Lively.` — the model thinking out loud. Modern models spend the output budget on internal reasoning, so the answer never arrived (`finishReason=MAX_TOKENS`).
+
+The fix is `thinkingConfig: {thinkingBudget: 0}`: the task needs a short JSON object, not deliberation. Replies now arrive complete in ~1.5s, and cost dropped several times over, because thinking is billed as output tokens — the expensive kind.
+
+### The translator froze the entire bot
+
+`deep_translator` is synchronous. Called directly from async code it blocked the only thread: while a headline was being translated the bot answered no commands and polled no updates — up to 6 seconds per post.
+
+One line fixes it (`asyncio.to_thread(...)`), but finding it requires knowing how the event loop works: from the outside the bot looked healthy.
+
+### Certificate verification had been switched off instead of fixed
+
+The code carried `verify_mode = CERT_NONE` — the bot trusted any server claiming to be the source. The reason turned up too: the local Python had no root certificate store, requests failed, and verification was disabled wholesale rather than diagnosed.
+
+The proper fix is the `certifi` bundle: the same roots on any machine, in CI and in Docker. Verification is on everywhere, and an expired source certificate now produces a clear log line instead of silent trust.
+
+### Sound filters, combined, emptied the channel
+
+Each filter was reasonable on its own, but they are joined by AND. On a monthly-report day the funnel looked like this:
+
+```
+70 stories in feeds → 43 passed keywords → 19 passed the brand filter
+→ 7 fresh (24h) → 5 unpublished → 0 passed the AI relevance check
+```
+
+Every fresh story was a sales figure, the filter rejected them all — correctly — and the channel got nothing. The flow is narrow (11 brands, 4 feeds), so the freshness window went from 24h to 72h (7 stories versus 18) and the relevance check now accepts sales growth for a model while still rejecting financials and factories. Same day, re-measured: 0 publishable before, 9 after.
+
+### Access control is enforced by a test, not by reading the code
+
+One can verify `if user_id != ADMIN_ID` in every handler by eye, but the next command added is the one that will miss it.
+
+Instead, a test walks every command registered in the bot, calls each as a stranger and requires that the bot does not reply, does not write to the database and does not toggle publishing. A command without a guard fails the build. It immediately found an inconsistency: `/delete_last` answered strangers with "Нет прав." while the rest stayed silent — a reply confirms the command exists, so it was removed.
 
 ## Admin commands
 
@@ -180,7 +236,7 @@ curl -s https://generativelanguage.googleapis.com/v1beta/models \
 
 ## Tests
 
-155 unit tests cover the keyword and brand filters, URL normalization, summary and image extraction, caption limits, post assembly, enquiry buttons, the price note, quiet hours, demo mode, admin-only access to every command, and the whole database layer. They run on every push via GitHub Actions.
+155 unit tests cover the keyword and brand filters, URL normalization, summary and image extraction, caption limits, post assembly, enquiry buttons, the price note, quiet hours, demo mode, admin-only access to every command, and the whole database layer. They run on every push via GitHub Actions. Line coverage is 82% (database layer 95%, configuration 84%).
 
 ```bash
 pip install -r requirements-dev.txt
