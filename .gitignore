@@ -12,3 +12,8 @@ __pycache__/
 __MACOSX/
 # Служебные папки редакторов
 .claude/
+
+# Отчёты о покрытии тестами
+.coverage
+htmlcov/
+.pytest_cache/
