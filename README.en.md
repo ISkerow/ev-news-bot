@@ -140,9 +140,16 @@ Secrets and tuning go through environment variables (`.env` is supported).
 | Variable | Description |
 |---|---|
 | `GEMINI_API_KEY` | Enables AI rewrite and the relevance/duplicate checks ([aistudio.google.com](https://aistudio.google.com)); unset = plain translation |
-| `GEMINI_MODEL` | Model for all AI calls (default `gemini-3.8-flash`) |
+| `GEMINI_MODEL` | Model for all AI calls (default `gemini-3.8-flash`, see the note below) |
 | `SIMILARITY_CANDIDATE` | Title similarity above which a pair is sent to the AI duplicate check (default `0.3`) |
 | `SIMILARITY_THRESHOLD` | Lexical duplicate threshold, used only when the AI is unavailable (default `0.7`) |
+
+**Choosing a model.** On the Gemini free tier the newest models often answer `503` — free requests have low priority and are turned away from a busy model. The bot survives it (retries, then falls back to plain translation), but the AI rewrite will not run. If the log shows `Gemini: модель занята`, pin an older model, e.g. `GEMINI_MODEL=gemini-3.6-flash`. To list the models your key can use:
+
+```bash
+curl -s https://generativelanguage.googleapis.com/v1beta/models \
+  -H "x-goog-api-key: YOUR_KEY" | grep '"name"'
+```
 
 ### Scheduling and storage
 
