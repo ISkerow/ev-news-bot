@@ -8,14 +8,20 @@ import sys
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
-from aiogram import Bot, Dispatcher, types, Router
+
+from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandObject
-from aiogram.types import (BotCommand, BotCommandScopeChat, BotCommandScopeDefault,
-                           InlineKeyboardMarkup, InlineKeyboardButton)
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.exceptions import TelegramRetryAfter
+from aiogram.filters import Command, CommandObject
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 
 import config
 from database import Database
@@ -59,7 +65,7 @@ def today_start_utc() -> str:
     return day_start.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
 
-def is_quiet_now(hour: int = None) -> bool:
+def is_quiet_now(hour: int | None = None) -> bool:
     """Сейчас тихие часы? (hour подставляется в тестах)"""
     if config.QUIET is None:
         return False
@@ -169,7 +175,7 @@ class QueueManager:
             row.append(InlineKeyboardButton(text=config.BUTTON_TEXT, url=config.MANAGER_URL))
         return InlineKeyboardMarkup(inline_keyboard=[row]) if row else None
 
-    def _build_text(self, item: dict, title_ru: str, summary_ru: str, limit: int = None) -> str:
+    def _build_text(self, item: dict, title_ru: str, summary_ru: str, limit: int | None = None) -> str:
         """Собирает текст поста. limit — максимум символов (подпись к фото ограничена
         1024). Если не влезаем, сокращаем описание: заголовок и ссылку режем в последнюю
         очередь, они важнее."""
@@ -281,7 +287,9 @@ class QueueManager:
                 stats = await self.db.get_stats(today_start_utc())
                 if stats['today'] >= config.MAX_POSTS_PER_DAY:
                     if not self._limit_logged:
-                        logger.info(f"Дневной лимит ({config.MAX_POSTS_PER_DAY} постов) исчерпан — ждём завтра")
+                        logger.info(
+                            f"Дневной лимит ({config.MAX_POSTS_PER_DAY} постов) исчерпан — ждём завтра"
+                        )
                         self._limit_logged = True
                     await asyncio.sleep(600)
                     continue
@@ -298,9 +306,7 @@ class QueueManager:
                     )
                 elif await self.db.url_exists(item['url']):
                     pass  # уже публиковали — проверяем до обращений к ИИ, так дешевле
-                elif await self._is_duplicate_story(item):
-                    pass  # лог внутри; URL добавлен в skipped
-                elif not await self._is_interesting(item):
+                elif await self._is_duplicate_story(item) or not await self._is_interesting(item):
                     pass  # лог внутри; URL добавлен в skipped
                 else:
                     attempted = True
@@ -656,7 +662,8 @@ async def run_demo(count: int):
     # Запасной набор: в дни отчётов все новости оказываются «не про выбор машины».
     # По умолчанию выключен — включается через DEMO_FALLBACK=true.
     if config.DEMO_FALLBACK and published < count and held_back:
-        logger.info(f"Подходящих новостей мало — добираем {min(count - published, len(held_back))} из отсеянных")
+        to_add = min(count - published, len(held_back))
+        logger.info(f"Подходящих новостей мало — добираем {to_add} из отсеянных")
         for item in held_back:
             if published >= count:
                 break
@@ -675,10 +682,17 @@ async def run_demo(count: int):
 async def main():
     await prepare_db()
     dp.include_router(router)
-    
-    asyncio.create_task(queue_manager.worker())
-    asyncio.create_task(scheduled_parser())
-    
+
+    # Ссылки на задачи держим в переменных: без них сборщик мусора вправе
+    # уничтожить задачу прямо посреди работы, и бот молча перестанет
+    # публиковать или опрашивать ленты
+    background_tasks = {
+        asyncio.create_task(queue_manager.worker()),
+        asyncio.create_task(scheduled_parser()),
+    }
+    for task in background_tasks:
+        task.add_done_callback(background_tasks.discard)
+
     await bot.delete_webhook(drop_pending_updates=True)
     await setup_commands()
     logger.info("🚀 Бот успешно запущен!")

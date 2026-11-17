@@ -2,7 +2,6 @@ import config
 import main
 from config import _parse_quiet_hours
 
-
 # --- Разбор строки из .env ---
 
 def test_parse_night_window():

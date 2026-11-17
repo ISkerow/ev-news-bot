@@ -6,8 +6,8 @@ class FakeEntry(dict):
     def __getattr__(self, name):
         try:
             return self[name]
-        except KeyError:
-            raise AttributeError(name)
+        except KeyError as e:
+            raise AttributeError(name) from e
 
 
 # --- Фильтр по ключевым словам ---

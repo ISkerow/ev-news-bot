@@ -15,4 +15,14 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - run: pytest -v --cov=. --cov-report=term
+      - name: Линтер
+        run: ruff check .
+      - name: Уязвимости в зависимостях
+        # PYSEC-2022-252 игнорируется осознанно: в 2022 аккаунт автора
+        # deep-translator взломали и выпустили вредоносную сборку 1.8.5,
+        # которая крала переменные окружения. Её удалили с PyPI, но диапазон
+        # «затронутых версий» в базе остался незакрытым, поэтому
+        # предупреждение висит и на чистых релизах. Используется 1.11.4.
+        run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2022-252
+      - name: Тесты
+        run: pytest -v --cov=. --cov-report=term

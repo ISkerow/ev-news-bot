@@ -1,9 +1,9 @@
 """Меню команд: полнота списка и то, что его видит только админ."""
 from aiogram.types import BotCommandScopeChat, BotCommandScopeDefault
+from test_admin_access import registered_commands
 
 import config
 import main
-from test_admin_access import registered_commands
 
 
 def test_menu_covers_every_command():

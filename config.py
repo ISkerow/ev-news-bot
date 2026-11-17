@@ -1,11 +1,12 @@
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 MANAGER_URL = os.getenv("MANAGER_URL")  # Запасная ссылка под постом, если WhatsApp не настроен
 
 # --- Кнопка заявки под постом (WhatsApp) ---

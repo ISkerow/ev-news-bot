@@ -89,7 +89,7 @@ async def _async_value(v): return v
 
 def test_retriable_statuses_cover_rate_limit_and_overload():
     """429 — превышен лимит запросов, 503 — модель занята: оба временные."""
-    assert parser_module.RETRIABLE_STATUSES == {429, 503}
+    assert {429, 503} == parser_module.RETRIABLE_STATUSES
     assert parser_module.GEMINI_ATTEMPTS >= 2
     assert parser_module.GEMINI_RETRY_DELAY > 0
 

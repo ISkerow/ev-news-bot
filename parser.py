@@ -1,16 +1,18 @@
+import asyncio
+import functools
+import json
+import logging
 import re
 import ssl
-import json
-import asyncio
-import logging
-import functools
 from datetime import datetime, timezone
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
 import aiohttp
 import certifi
 import feedparser
-from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator, MyMemoryTranslator
+
 import config
 
 logger = logging.getLogger("NewsBot")
@@ -19,6 +21,9 @@ logger = logging.getLogger("NewsBot")
 REQUEST_TIMEOUT = 30   # секунд на один запрос
 MAX_ATTEMPTS = 3       # попыток на каждый URL
 RETRY_BASE_DELAY = 2   # задержка растёт экспоненциально: 2, 4, 8 сек
+
+HTTP_OK = 200
+HTTP_TOO_MANY_REQUESTS = 429
 
 # Повторы запросов к Gemini: 429 — превышен лимит запросов в минуту,
 # 503 — модель временно перегружена. И то, и другое проходит само.
@@ -65,7 +70,7 @@ class NewsParser:
     def load_keywords() -> list:
         """Загружает ключевые слова из JSON файла."""
         try:
-            with open("keywords.json", "r", encoding="utf-8") as f:
+            with open("keywords.json", encoding="utf-8") as f:
                 data = json.load(f)
                 return data.get("keywords", [])
         except Exception as e:
@@ -114,7 +119,7 @@ class NewsParser:
         return bool(NewsParser._build_pattern(tuple(keywords)).search(title))
 
     @staticmethod
-    def has_target_brand(title: str, summary: str = "", brands: list = None) -> bool:
+    def has_target_brand(title: str, summary: str = "", brands: list | None = None) -> bool:
         """Есть ли в новости нужная марка. Список берём из базы (её правят командами),
         а без него — из config. Пустой список = фильтр выключен.
         Смотрим и заголовок, и описание: в заголовке часто только модель («Denza N8»),
@@ -151,7 +156,7 @@ class NewsParser:
         def words(text):
             raw = re.findall(r"[a-zа-яё0-9]+", text.lower())
             # грубое приведение множественного числа: prices -> price
-            stemmed = {w[:-1] if w.endswith("s") else w for w in raw if len(w) > 2}
+            stemmed = {w.removesuffix("s") for w in raw if len(w) > 2}
             return stemmed - STOP_WORDS
         wa, wb = words(a), words(b)
         if not wa or not wb:
@@ -245,32 +250,32 @@ class NewsParser:
         data = None
         for attempt in range(1, GEMINI_ATTEMPTS + 1):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        url, json=payload, ssl=SSL_CONTEXT, timeout=30,
-                        headers={"x-goog-api-key": config.GEMINI_API_KEY},
-                    ) as resp:
-                        if resp.status == 429 and "per day" in (await resp.text()).lower():
-                            # Дневная квота: ждать бессмысленно, она вернётся только завтра
-                            logger.warning(
-                                "Gemini: исчерпан дневной лимит бесплатного тарифа — "
-                                "до завтра посты идут через обычный перевод"
-                            )
-                            return None
-                        if resp.status in RETRIABLE_STATUSES and attempt < GEMINI_ATTEMPTS:
-                            delay = GEMINI_RETRY_DELAY * attempt  # 5, 10 сек
-                            reason = "лимит запросов" if resp.status == 429 else "модель занята"
-                            logger.warning(
-                                f"Gemini: {reason} ({resp.status}), повтор через {delay} сек "
-                                f"({attempt}/{GEMINI_ATTEMPTS})"
-                            )
-                            await asyncio.sleep(delay)
-                            continue
-                        if resp.status != 200:
-                            logger.warning(f"Gemini ответил {resp.status}")
-                            return None
-                        data = await resp.json()
-                        break
+                async with aiohttp.ClientSession() as session, session.post(
+                    url, json=payload, ssl=SSL_CONTEXT, timeout=30,
+                    headers={"x-goog-api-key": config.GEMINI_API_KEY},
+                ) as resp:
+                    if resp.status == HTTP_TOO_MANY_REQUESTS and "per day" in (await resp.text()).lower():
+                        # Дневная квота: ждать бессмысленно, она вернётся только завтра
+                        logger.warning(
+                            "Gemini: исчерпан дневной лимит бесплатного тарифа — "
+                            "до завтра посты идут через обычный перевод"
+                        )
+                        return None
+                    if resp.status in RETRIABLE_STATUSES and attempt < GEMINI_ATTEMPTS:
+                        delay = GEMINI_RETRY_DELAY * attempt  # 5, 10 сек
+                        too_many = resp.status == HTTP_TOO_MANY_REQUESTS
+                        reason = "лимит запросов" if too_many else "модель занята"
+                        logger.warning(
+                            f"Gemini: {reason} ({resp.status}), повтор через {delay} сек "
+                            f"({attempt}/{GEMINI_ATTEMPTS})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    if resp.status != HTTP_OK:
+                        logger.warning(f"Gemini ответил {resp.status}")
+                        return None
+                    data = await resp.json()
+                    break
             except (asyncio.TimeoutError, aiohttp.ClientError) as e:
                 # У таймаута пустой текст ошибки — печатаем тип, иначе лог молчит
                 if attempt < GEMINI_ATTEMPTS:
@@ -372,7 +377,7 @@ class NewsParser:
         try:
             async with aiohttp.ClientSession(headers=HEADERS) as session:
                 async with session.get(url, ssl=SSL_CONTEXT, timeout=15) as resp:
-                    if resp.status != 200:
+                    if resp.status != HTTP_OK:
                         return None
                     content = await resp.text()
             feed = feedparser.parse(content)
@@ -388,7 +393,7 @@ class NewsParser:
         try:
             async with aiohttp.ClientSession(headers=HEADERS) as session:
                 async with session.get(article_url, ssl=SSL_CONTEXT, timeout=15) as resp:
-                    if resp.status != 200:
+                    if resp.status != HTTP_OK:
                         return None
                     page = await resp.text()
             tag = BeautifulSoup(page, "html.parser").find("meta", property="og:image")
@@ -410,7 +415,7 @@ class NewsParser:
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
                 async with session.get(url, ssl=SSL_CONTEXT, timeout=REQUEST_TIMEOUT) as response:
-                    if response.status != 200:
+                    if response.status != HTTP_OK:
                         logger.warning(
                             f"[{url}] статус {response.status} (попытка {attempt}/{MAX_ATTEMPTS})"
                         )
@@ -448,7 +453,8 @@ class NewsParser:
         return None
 
     @staticmethod
-    async def fetch_rss(keywords: list = None, urls: list = None, brands: list = None) -> list:
+    async def fetch_rss(keywords: list | None = None, urls: list | None = None,
+                        brands: list | None = None) -> list:
         all_items = []
         if keywords is None:
             keywords = NewsParser.load_keywords()  # Фоллбэк: слова из JSON-файла

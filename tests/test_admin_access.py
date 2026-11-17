@@ -29,7 +29,6 @@ class FakeMessage:
 
     async def answer(self, text, **kwargs):
         self.replies.append(text)
-        return None
 
 
 class CountingDB:

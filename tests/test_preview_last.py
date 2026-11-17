@@ -59,7 +59,6 @@ async def test_preview_sends_to_admin_not_channel(monkeypatch, admin):
 
     async def fake_send(item, text, kb, chat_id=None):
         sent["chat_id"] = chat_id
-        return None
     monkeypatch.setattr(main.queue_manager, "_send_post", fake_send)
 
     await main.cmd_preview(admin)

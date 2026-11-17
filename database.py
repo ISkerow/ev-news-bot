@@ -1,5 +1,8 @@
-import aiosqlite
+import contextlib
 from datetime import datetime, timezone
+
+import aiosqlite
+
 
 class Database:
     def __init__(self, db_path: str):
@@ -18,11 +21,10 @@ class Database:
             await db.execute("CREATE TABLE IF NOT EXISTS keywords (word TEXT PRIMARY KEY)")
             await db.execute("CREATE TABLE IF NOT EXISTS sources (url TEXT PRIMARY KEY)")
             await db.execute("CREATE TABLE IF NOT EXISTS brands (name TEXT PRIMARY KEY)")
-            # Миграция для старых баз: колонка появилась позже самой таблицы
-            try:
+            # Миграция для старых баз: колонка появилась позже самой таблицы,
+            # на свежей базе запрос ожидаемо падает — она уже есть
+            with contextlib.suppress(aiosqlite.OperationalError):
                 await db.execute("ALTER TABLE sent_news ADD COLUMN title_en TEXT")
-            except aiosqlite.OperationalError:
-                pass  # колонка уже есть
             await db.commit()
 
     # --- Ключевые слова (живут в базе, чтобы переживать редеплой) ---
@@ -69,7 +71,7 @@ class Database:
             cursor = await db.execute("SELECT 1 FROM sent_news WHERE url = ?", (url,))
             return await cursor.fetchone() is not None
 
-    async def add_news(self, url: str, title: str, message_id: int, title_en: str = None):
+    async def add_news(self, url: str, title: str, message_id: int, title_en: str | None = None):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "INSERT OR IGNORE INTO sent_news (url, title, message_id, title_en) VALUES (?, ?, ?, ?)",
@@ -177,7 +179,7 @@ class Database:
             return cursor.rowcount > 0
 
     # НОВЫЙ МЕТОД ДЛЯ АДМИНКИ
-    async def get_stats(self, today_start: str = None):
+    async def get_stats(self, today_start: str | None = None):
         """Статистика. today_start — начало «сегодня» в UTC ('YYYY-MM-DD HH:MM:SS'),
         потому что posted_at хранится в UTC; по умолчанию — полночь по UTC."""
         if today_start is None:

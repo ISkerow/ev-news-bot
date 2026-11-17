@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 import config
 from parser import NewsParser
 
-
 # --- Похожесть заголовков (одна история с разных сайтов) ---
 
 def test_same_story_different_wording():

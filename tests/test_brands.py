@@ -1,4 +1,7 @@
+import pytest
+
 import config
+from database import Database
 from parser import NewsParser
 
 
@@ -44,8 +47,6 @@ def test_empty_brand_list_disables_filter(monkeypatch):
 
 # --- Марки в базе, управляемые командами ---
 
-import pytest
-from database import Database
 
 
 @pytest.fixture
