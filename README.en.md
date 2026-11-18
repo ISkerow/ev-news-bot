@@ -8,7 +8,7 @@
 
 *[Русская версия](README.md)*
 
-Telegram bot for a car dealership channel. It watches EV and hybrid news from RSS feeds, keeps only the stories about the brands the dealership actually sells, rewrites them into natural Russian with an LLM, and posts them with a photo and an enquiry button — fully unattended.
+Telegram bot for a car-business channel. It watches EV and hybrid news from RSS feeds, keeps only the stories about the brands the business actually sells, rewrites them into natural Russian with an LLM, and posts them with a photo and an enquiry button — fully unattended.
 
 Built for the Kazakhstan market (Chinese EV brands), but every filter is configuration, not code.
 
@@ -20,7 +20,7 @@ Built for the Kazakhstan market (Chinese EV brands), but every filter is configu
 
 <img src="docs/post-example.webp" width="420" alt="Example post in the channel">
 
-Every post is assembled automatically: cover image from the article, headline and summary rewritten by the AI, source with the story's age, hashtags, a fixed call to action and two enquiry buttons. Both buttons open a chat with the dealership and pre-fill the enquiry text with the headline of that post, so the manager instantly sees which car the customer is asking about.
+Every post is assembled automatically: cover image from the article, headline and summary rewritten by the AI, source with the story's age, hashtags, a fixed call to action and two enquiry buttons. Both buttons open a chat with the seller and pre-fill the enquiry text with the headline of that post, so the manager instantly sees which car the customer is asking about.
 
 When a post mentions a price, a "ℹ️ Цена указана для рынка Китая" line is appended after the summary, so a Chinese price is never read as a local one.
 
@@ -49,7 +49,7 @@ Every AI step degrades gracefully: no API key or a failing API never drops a pos
 
 ### Writing
 
-- **AI rewrite** — with `GEMINI_API_KEY` set, Gemini rewrites the headline and summary into natural Russian news style. The prompt forbids inventing anything beyond the source text, and explicitly forbids claims about local availability, pricing, delivery or credit — those belong to the dealership, not to a model. Thinking tokens are disabled, which keeps replies complete and cheap.
+- **AI rewrite** — with `GEMINI_API_KEY` set, Gemini rewrites the headline and summary into natural Russian news style. The prompt forbids inventing anything beyond the source text, and explicitly forbids claims about local availability, pricing, delivery or credit — those belong to the seller, not to a model. Thinking tokens are disabled, which keeps replies complete and cheap.
 - **Translation fallback chain** — Google Translate → MyMemory → the original English headline. A translator outage never drops a post.
 - **Fixed call to action** — `CTA_TEXT` is appended by code as the last line, above the buttons. The AI never sees it and cannot reword it.
 - **Chinese price note** — when a post mentions an amount in yuan or dollars, `PRICE_NOTE` is appended right after the summary, so a Chinese price is never mistaken for a local one. Detection requires a number next to the currency.
@@ -171,7 +171,7 @@ Secrets and tuning go through environment variables (`.env` is supported).
 
 | Variable | Description |
 |---|---|
-| `WHATSAPP_PHONE` | Dealership WhatsApp number, digits only; empty = no WhatsApp button |
+| `WHATSAPP_PHONE` | Seller's WhatsApp number, digits only; empty = no WhatsApp button |
 | `TELEGRAM_USERNAME` | Telegram nick for the second button, without `@`; empty = no Telegram button |
 | `BUTTON_TEXT` / `TELEGRAM_BUTTON_TEXT` | Button captions |
 | `WHATSAPP_MESSAGE` | Pre-filled enquiry text; `{title}` is replaced with the post headline |
