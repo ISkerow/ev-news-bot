@@ -122,13 +122,21 @@ class NewsParser:
     def has_target_brand(title: str, summary: str = "", brands: list | None = None) -> bool:
         """Есть ли в новости нужная марка. Список берём из базы (её правят командами),
         а без него — из config. Пустой список = фильтр выключен.
-        Смотрим и заголовок, и описание: в заголовке часто только модель («Denza N8»),
-        а марка упомянута в первой строке текста."""
+        Заголовок главнее описания: наша марка в заголовке — берём; чужая марка
+        в заголовке без нашей — не берём, даже если наша есть в описании
+        («кей-кар Chery станет конкурентом BYD»). Если в заголовке марок нет,
+        смотрим описание: там часто только модель («Denza N8»), а марка — в тексте."""
         brands = config.KZ_BRANDS if brands is None else brands
         if not brands:
             return True
         pattern = NewsParser._build_pattern(tuple(brands))
-        return bool(pattern.search(f"{title} {summary}"))
+        if pattern.search(title):
+            return True
+        ours = {b.lower() for b in brands}
+        others = tuple(b for b in config.OTHER_BRANDS if b.lower() not in ours)
+        if others and NewsParser._build_pattern(others).search(title):
+            return False
+        return bool(pattern.search(summary))
 
     @staticmethod
     def _parse_published(entry):

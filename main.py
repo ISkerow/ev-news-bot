@@ -128,10 +128,12 @@ class QueueManager:
         return True
 
     async def _is_duplicate_story(self, item: dict) -> bool:
-        """Та же история уже выходила с другого сайта? Сравниваем заголовки за 48 часов.
+        """Та же история уже выходила с другого сайта? Сравниваем заголовки за
+        config.DEDUP_WINDOW_HOURS (по умолчанию 5 суток).
         Лексика даёт кандидатов, финальное решение — за ИИ (если подключён):
         'BYD starts production' и 'BYD halts production' по словам почти одинаковы."""
-        since = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime('%Y-%m-%d %H:%M:%S')
+        since_dt = datetime.now(timezone.utc) - timedelta(hours=config.DEDUP_WINDOW_HOURS)
+        since = since_dt.strftime('%Y-%m-%d %H:%M:%S')
         for title in await self.db.get_recent_titles(since):
             score = NewsParser.title_similarity(item['title_en'], title)
             if score < config.SIMILARITY_CANDIDATE:

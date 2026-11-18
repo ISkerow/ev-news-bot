@@ -35,6 +35,26 @@ def test_news_without_target_brand_is_rejected():
     assert not NewsParser.has_target_brand("Tesla FSD tested on Bratislava streets")
 
 
+def test_other_brand_in_title_wins_over_ours_in_summary():
+    """Случай из канала: новость про Chery прошла, потому что в описании упомянут BYD."""
+    assert not NewsParser.has_target_brand(
+        "Patent images reveal off-road version of Chery JV kei car",
+        "The electric microcar will compete with the BYD Racco",
+    )
+
+
+def test_our_brand_in_title_passes_even_next_to_other():
+    """Сравнение «наша против чужой» в заголовке — это новость и про нашу марку."""
+    assert NewsParser.has_target_brand("BYD Seal outsells Tesla Model 3 in China")
+
+
+def test_brand_added_by_command_is_not_treated_as_other():
+    """Чужая марка, добавленная в наш список (/add_brand), становится нашей."""
+    assert NewsParser.has_target_brand(
+        "Leapmotor C16 gets a facelift", brands=["BYD", "Leapmotor"]
+    )
+
+
 def test_word_boundaries_hold():
     """«Avatr» не должен ловиться в слове «avatar»."""
     assert not NewsParser.has_target_brand("New avatars for the car app")

@@ -78,6 +78,17 @@ KZ_BRANDS = [
     "Deepal",     # электромарка Changan
 ]
 
+# Чужие марки. Если такая названа в заголовке, а нашей там нет, новость не берём,
+# даже если наша марка мелькает в описании: «кей-кар Chery станет конкурентом
+# BYD Racco» — это новость про Chery. Марки, которые есть в нашем списке
+# (или добавлены командой /add_brand), отсюда автоматически не учитываются.
+OTHER_BRANDS = [
+    "Chery", "Geely", "Great Wall", "GWM", "Haval", "Tank", "Jetour", "Exeed",
+    "Omoda", "Jaecoo", "Hongqi", "Leapmotor", "NIO", "XPeng", "Xpeng", "Wuling",
+    "SAIC", "GAC", "Aion", "Voyah", "Tesla", "Toyota", "Volkswagen", "Hyundai",
+    "Kia", "BMW", "Mercedes", "Audi", "Porsche", "Nissan", "Honda", "Ford",
+]
+
 # Источник, чьи новости уходят в канал первыми (имя из SOURCE_NAMES).
 # CarNewsChina пишет о китайских марках подробнее остальных.
 PRIORITY_SOURCE = "CarNewsChina"
@@ -152,6 +163,14 @@ try:
     SIMILARITY_CANDIDATE = float(os.getenv("SIMILARITY_CANDIDATE", "0.3"))
 except ValueError:
     SIMILARITY_CANDIDATE = 0.3
+
+# За сколько часов назад искать ту же историю с другого сайта. 48 ч было мало:
+# CnEVPost и CarNewsChina пишут об одном событии с разницей в 2–3 дня.
+# Больше окно — больше пар уходит на проверку ИИ (дневной лимит Gemini).
+try:
+    DEDUP_WINDOW_HOURS = int(os.getenv("DEDUP_WINDOW_HOURS", "120"))
+except ValueError:
+    DEDUP_WINDOW_HOURS = 120
 
 # Запас для новостей, которые уже стоят в очереди: сколько лишних часов им прощаем,
 # чтобы они не протухали, пока ждут тихих часов или своей минуты в очереди.

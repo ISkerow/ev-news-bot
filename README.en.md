@@ -14,7 +14,7 @@ Built for the Kazakhstan market (Chinese EV brands), but every filter is configu
 
 ## Live demo
 
-**[@evbotd](https://t.me/evbotd)** — the channel this bot fills. Posts can be read [right in a browser](https://t.me/s/evbotd), no Telegram needed.
+**[@evbotd](https://t.me/evbotd)** — a channel with sample posts produced by this bot. Posts can be read [right in a browser](https://t.me/s/evbotd), no Telegram needed.
 
 ## What a post looks like
 
@@ -40,10 +40,10 @@ Every AI step degrades gracefully: no API key or a failing API never drops a pos
 
 ### Content selection
 
-- **Brand filter** — a story is published only if one of the configured brands (Zeekr, Li Auto/LiXiang, BYD, Denza, Yangwang, Xiaomi, Avatr, Changan, Deepal) appears in its title or summary. The list lives in the database and is edited from Telegram with `/add_brand`; `KZ_BRANDS` in config only seeds it on first run. Word-boundary matching, so `Avatr` never matches "avatar". An empty list disables the filter.
+- **Brand filter** — a story is published only if one of the configured brands (Zeekr, Li Auto/LiXiang, BYD, Denza, Yangwang, Xiaomi, Avatr, Changan, Deepal) appears in its title or summary. The title wins: if it names another brand (Chery, Geely, Tesla…) and none of ours, the story is skipped even when one of ours is mentioned in the text as a competitor. The list lives in the database and is edited from Telegram with `/add_brand`; `KZ_BRANDS` in config only seeds it on first run. Word-boundary matching, so `Avatr` never matches "avatar". An empty list disables the filter.
 - **Hybrid coverage** — PHEV, EREV, REEV, DM-i, DM-p and plug-in hybrid are first-class keywords, not just battery EVs.
 - **AI relevance check** — before publishing, the model is asked whether the story matters to someone *choosing a car*. Model launches, specs, prices, range, reviews and test drives pass; company financials, headcount, factory construction, politics, subsidies and foreign charging infrastructure are skipped.
-- **Two-level deduplication** — SQLite keyed by normalized article URL (tracking parameters stripped), plus cross-source story detection: lexical similarity picks candidates from the last 48h and the AI decides, because word overlap alone cannot tell "BYD starts production" from "BYD halts production". Without an API key it falls back to a conservative lexical threshold.
+- **Two-level deduplication** — SQLite keyed by normalized article URL (tracking parameters stripped), plus cross-source story detection: lexical similarity picks candidates from the last 5 days (`DEDUP_WINDOW_HOURS`) and the AI decides, because word overlap alone cannot tell "BYD starts production" from "BYD halts production". Without an API key it falls back to a conservative lexical threshold.
 - **Freshness guarantee** — articles older than `MAX_NEWS_AGE_HOURS` (default 24) are never published, checked again at send time in case a story waited out the window in the queue. Each post shows the article's age.
 - **Priority source** — `PRIORITY_SOURCE` outranks freshness, so the feed that covers these brands best goes out first.
 
@@ -186,6 +186,7 @@ Secrets and tuning go through environment variables (`.env` is supported).
 | `GEMINI_API_KEY` | Enables AI rewrite and the relevance/duplicate checks ([aistudio.google.com](https://aistudio.google.com)); unset = plain translation |
 | `GEMINI_MODEL` | Model for all AI calls (default `gemini-3.8-flash`, see the note below) |
 | `SIMILARITY_CANDIDATE` | Title similarity above which a pair is sent to the AI duplicate check (default `0.3`) |
+| `DEDUP_WINDOW_HOURS` | How many hours back to look for the same story from another site (default `120`, 5 days) |
 | `SIMILARITY_THRESHOLD` | Lexical duplicate threshold, used only when the AI is unavailable (default `0.7`) |
 
 **Choosing a model.** On the Gemini free tier the newest models often answer `503` — free requests have low priority and are turned away from a busy model. The bot survives it (retries, then falls back to plain translation), but the AI rewrite will not run. If the log shows `Gemini: модель занята`, pin an older model, e.g. `GEMINI_MODEL=gemini-3.6-flash`. To list the models your key can use:
